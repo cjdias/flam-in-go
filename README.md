@@ -1,2 +1,3 @@
-# flam-in-go
-Application framework based in the Uber's dependency injection package
+# flam
+
+flam-in-go is a base application framework package using the Uber's dig dependency injection package
