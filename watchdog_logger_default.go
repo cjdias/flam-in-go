@@ -17,14 +17,14 @@ type defaultWatchdogLogger struct {
 var _ WatchdogLogger = (*defaultWatchdogLogger)(nil)
 
 func newDefaultWatchdogLogger(
-	logget Logger,
+	logger Logger,
 	channel string,
 	startLevel LogLevel,
 	errorLevel LogLevel,
 	doneLevel LogLevel,
 ) WatchdogLogger {
 	return &defaultWatchdogLogger{
-		logger:  logget,
+		logger:  logger,
 		channel: channel,
 		levels: defaultWatchdogLoggerLevels{
 			start: startLevel,

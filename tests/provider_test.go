@@ -849,7 +849,7 @@ func Test_Provider_Register(t *testing.T) {
 		assert.NoError(t, app.Container().Invoke(func(flam.TranslatorFactory) {}))
 	})
 
-	t.Run("should provider a 'english' translator instance", func(t *testing.T) {
+	t.Run("should provider a 'English' translator instance", func(t *testing.T) {
 		config := flam.Bag{}
 		_ = config.Set(flam.PathTranslators, flam.Bag{
 			"my_translator": flam.Bag{
@@ -1017,7 +1017,7 @@ func Test_Provider_Config(t *testing.T) {
 			assert.Equal(t, config.Get(flam.PathMigratorDefaultLoggerChannel), flam.DefaultMigratorLoggerChannel)
 			assert.Equal(t, config.Get(flam.PathMigratorDefaultLoggerStartLevel), flam.DefaultMigratorLoggerStartLevel)
 			assert.Equal(t, config.Get(flam.PathMigratorDefaultLoggerErrorLevel), flam.DefaultMigratorLoggerErrorLevel)
-			assert.Equal(t, config.Get(flam.PathMigratorDefaultLoggerDoneLevel), flam.DefaultMigratorLoggetDoneLevel)
+			assert.Equal(t, config.Get(flam.PathMigratorDefaultLoggerDoneLevel), flam.DefaultMigratorLoggerDoneLevel)
 
 			assert.Equal(t, config.Get(flam.PathRedisMiniBoot), flam.DefaultRedisMiniBoot)
 			assert.Equal(t, config.Get(flam.PathRedisDefaultHost), flam.DefaultRedisHost)
@@ -1105,12 +1105,12 @@ func Test_Provider_Boot(t *testing.T) {
 	t.Run("should not boot log streams if is not flagged to do so", func(t *testing.T) {
 		config := flam.Bag{}
 		_ = config.Set(flam.PathLogSerializers, flam.Bag{
-			"my_serialzier": flam.Bag{
+			"my_serializer": flam.Bag{
 				"driver": flam.LogSerializerDriverJson}})
 		_ = config.Set(flam.PathLogStreams, flam.Bag{
 			"my_stream": flam.Bag{
 				"driver":        flam.LogStreamDriverConsole,
-				"serializer_id": "my_serialzier"}})
+				"serializer_id": "my_serializer"}})
 
 		app := flam.NewApplication(config)
 		defer func() { _ = app.Close() }()
@@ -1126,12 +1126,12 @@ func Test_Provider_Boot(t *testing.T) {
 		config := flam.Bag{}
 		_ = config.Set(flam.PathLogBoot, true)
 		_ = config.Set(flam.PathLogSerializers, flam.Bag{
-			"my_serialzier": flam.Bag{
+			"my_serializer": flam.Bag{
 				"driver": flam.LogSerializerDriverJson}})
 		_ = config.Set(flam.PathLogStreams, flam.Bag{
 			"my_stream": flam.Bag{
 				"driver":        flam.LogStreamDriverConsole,
-				"serializer_id": "my_serialzier"}})
+				"serializer_id": "my_serializer"}})
 
 		app := flam.NewApplication(config)
 		defer func() { _ = app.Close() }()

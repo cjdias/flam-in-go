@@ -22,7 +22,7 @@ task quality:format
 
 if [ $? -ne 0 ]; then
     echo 
-    echo "${RED}✗${NC} Code foramtting failed. Aborting commit."
+    echo "${RED}✗${NC} Code formatting failed. Aborting commit."
     exit 1 # Exit the script with a non-zero code to indicate failure
 fi
 

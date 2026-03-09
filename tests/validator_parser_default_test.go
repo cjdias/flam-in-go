@@ -65,7 +65,7 @@ func Test_DefaultValidationParser_Parse(t *testing.T) {
 		fieldErrorMock.EXPECT().Tag().Return("hostname_rfc1123")
 		fieldErrorMock.EXPECT().Translate(gomock.Any()).Return("translated field error")
 
-		validatorValidationErrors := []validator.FieldError{}
+		var validatorValidationErrors []validator.FieldError
 		validatorValidationErrors = append(validatorValidationErrors, fieldErrorMock)
 
 		require.NoError(t, app.Boot())
@@ -114,7 +114,7 @@ func Test_DefaultValidationParser_AddTagCode(t *testing.T) {
 		fieldErrorMock.EXPECT().Tag().Return("my_tag")
 		fieldErrorMock.EXPECT().Translate(gomock.Any()).Return("translated field error")
 
-		validatorValidationErrors := []validator.FieldError{}
+		var validatorValidationErrors []validator.FieldError
 		validatorValidationErrors = append(validatorValidationErrors, fieldErrorMock)
 
 		require.NoError(t, app.Boot())
