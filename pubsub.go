@@ -2,83 +2,85 @@ package flam
 
 import (
 	"sync"
+
+	"github.com/bmatcuk/doublestar/v4"
 )
 
-type PubSubID comparable
+type PubSubHandler func(data ...any) error
 
-type PubSubChannel comparable
-
-type PubSubHandler[I PubSubID, C PubSubChannel] func(channel C, data ...any) error
-
-type PubSub[I PubSubID, C PubSubChannel] interface {
-	Subscribe(id I, channel C, handler PubSubHandler[I, C]) error
-	Unsubscribe(id I, channel C) error
-	Publish(channel C, data ...any) error
+type PubSub interface {
+	Subscribe(id string, channel string, handler PubSubHandler) error
+	Unsubscribe(id string) error
+	Publish(channel string, data ...any) error
 }
 
-type pubsub[I PubSubID, C PubSubChannel] struct {
+type pubsubReg struct {
+	channel string
+	handler PubSubHandler
+}
+
+type pubsub struct {
 	locker   sync.Locker
-	handlers map[C]map[I]PubSubHandler[I, C]
+	handlers map[string]pubsubReg
 }
 
-var _ PubSub[string, string] = (*pubsub[string, string])(nil)
+var _ PubSub = (*pubsub)(nil)
 
-func NewPubSub[I PubSubID, C PubSubChannel]() PubSub[I, C] {
-	return &pubsub[I, C]{
+func NewPubSub() PubSub {
+	return &pubsub{
 		locker:   &sync.Mutex{},
-		handlers: map[C]map[I]PubSubHandler[I, C]{},
+		handlers: map[string]pubsubReg{},
 	}
 }
 
-func (ps *pubsub[I, C]) Subscribe(
-	id I,
-	channel C,
-	handler PubSubHandler[I, C],
+func (ps *pubsub) Subscribe(
+	id string,
+	channel string,
+	handler PubSubHandler,
 ) error {
+	if doublestar.ValidatePattern(channel) == false {
+		return newErrInvalidSubscriptionChannelPattern(channel)
+	}
+
 	ps.locker.Lock()
 	defer ps.locker.Unlock()
 
-	if _, ok := ps.handlers[channel]; !ok {
-		ps.handlers[channel] = map[I]PubSubHandler[I, C]{}
+	if _, ok := ps.handlers[id]; ok {
+		return newErrDuplicateSubscription(id)
 	}
 
-	if _, ok := ps.handlers[channel][id]; ok {
-		return newErrDuplicateSubscription(id, channel)
-	}
-
-	ps.handlers[channel][id] = handler
+	ps.handlers[id] = pubsubReg{
+		channel: channel,
+		handler: handler}
 
 	return nil
 }
 
-func (ps *pubsub[I, C]) Unsubscribe(
-	id I,
-	channel C,
+func (ps *pubsub) Unsubscribe(
+	id string,
 ) error {
 	ps.locker.Lock()
 	defer ps.locker.Unlock()
 
-	if subs, ok := ps.handlers[channel]; ok {
-		if _, ok = ps.handlers[channel][id]; ok {
-			delete(subs, id)
+	if _, ok := ps.handlers[id]; ok {
+		delete(ps.handlers, id)
 
-			return nil
-		}
+		return nil
 	}
 
-	return newErrSubscriptionNotFound(id, channel)
+	return newErrSubscriptionNotFound(id)
 }
 
-func (ps *pubsub[I, C]) Publish(
-	channel C,
+func (ps *pubsub) Publish(
+	channel string,
 	data ...any,
 ) error {
 	ps.locker.Lock()
 	defer ps.locker.Unlock()
 
-	if subs, ok := ps.handlers[channel]; ok {
-		for _, handler := range subs {
-			if e := handler(channel, data...); e != nil {
+	for _, reg := range ps.handlers {
+		if doublestar.MatchUnvalidated(reg.channel, channel) {
+			if e := reg.handler(data...); e != nil {
 				return e
 			}
 		}

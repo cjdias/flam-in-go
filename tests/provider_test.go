@@ -34,7 +34,7 @@ func Test_Provider_Register(t *testing.T) {
 
 		require.NoError(t, app.Boot())
 
-		assert.NoError(t, app.Container().Invoke(func(flam.PubSub[string, string]) {}))
+		assert.NoError(t, app.Container().Invoke(func(flam.PubSub) {}))
 	})
 
 	t.Run("should provider a timer instance", func(t *testing.T) {

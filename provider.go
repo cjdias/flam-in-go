@@ -50,7 +50,7 @@ func (*provider) Register(
 	container *dig.Container,
 ) error {
 	return NewRegisterer().
-		Queue(func() PubSub[string, string] { return NewPubSub[string, string]() }).
+		Queue(func() PubSub { return NewPubSub() }).
 		Queue(newTimer).
 		Queue(newTriggerFactory).
 		Queue(newDiskFactory).

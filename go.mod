@@ -6,6 +6,7 @@ require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/agiledragon/gomonkey/v2 v2.14.0
 	github.com/alicebob/miniredis/v2 v2.37.0
+	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/go-playground/locales v0.14.1
 	github.com/go-playground/universal-translator v0.18.1
 	github.com/go-playground/validator/v10 v10.30.1

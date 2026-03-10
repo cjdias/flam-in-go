@@ -14,6 +14,7 @@ var (
 	ErrDuplicateResource                 = errors.New("duplicate resource")
 	ErrSubscriptionNotFound              = errors.New("subscription not found")
 	ErrDuplicateSubscription             = errors.New("duplicate subscription")
+	ErrInvalidSubscriptionChannelPattern = errors.New("invalid subscription channel pattern")
 	ErrDuplicateProvider                 = errors.New("duplicate provider")
 	ErrRestConfigSourceConfigNotFound    = errors.New("config rest source config source data not found")
 	ErrInvalidRestConfigSourceConfig     = errors.New("invalid config rest source config source data")
@@ -69,18 +70,22 @@ func newErrDuplicateResource(
 	return NewErrorFrom(ErrDuplicateResource, id)
 }
 
-func newErrSubscriptionNotFound[I PubSubID, C PubSubChannel](
-	id I,
-	channel C,
+func newErrSubscriptionNotFound(
+	id string,
 ) error {
-	return NewErrorFrom(ErrSubscriptionNotFound, fmt.Sprintf("%v[%v]", id, channel))
+	return NewErrorFrom(ErrSubscriptionNotFound, id)
 }
 
-func newErrDuplicateSubscription[I PubSubID, C PubSubChannel](
-	id I,
-	channel C,
+func newErrDuplicateSubscription(
+	id string,
 ) error {
-	return NewErrorFrom(ErrDuplicateSubscription, fmt.Sprintf("%v[%v]", id, channel))
+	return NewErrorFrom(ErrDuplicateSubscription, id)
+}
+
+func newErrInvalidSubscriptionChannelPattern(
+	channel string,
+) error {
+	return NewErrorFrom(ErrInvalidSubscriptionChannelPattern, channel)
 }
 
 func newErrDuplicateProvider(
