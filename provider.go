@@ -50,7 +50,7 @@ func (*provider) Register(
 	container *dig.Container,
 ) error {
 	return NewRegisterer().
-		Queue(func() PubSub[string, string] { return NewPubSub[string, string]() }).
+		Queue(func() PubSub { return NewPubSub() }).
 		Queue(newTimer).
 		Queue(newTriggerFactory).
 		Queue(newDiskFactory).
@@ -153,7 +153,7 @@ func (*provider) Config(
 	_ = config.Set(PathMigratorDefaultLoggerChannel, DefaultMigratorLoggerChannel)
 	_ = config.Set(PathMigratorDefaultLoggerStartLevel, DefaultMigratorLoggerStartLevel)
 	_ = config.Set(PathMigratorDefaultLoggerErrorLevel, DefaultMigratorLoggerErrorLevel)
-	_ = config.Set(PathMigratorDefaultLoggerDoneLevel, DefaultMigratorLoggetDoneLevel)
+	_ = config.Set(PathMigratorDefaultLoggerDoneLevel, DefaultMigratorLoggerDoneLevel)
 
 	_ = config.Set(PathRedisMiniBoot, DefaultRedisMiniBoot)
 	_ = config.Set(PathRedisDefaultHost, DefaultRedisHost)

@@ -14,28 +14,37 @@ import (
 )
 
 func Test_PubSub_Subscribe(t *testing.T) {
-	t.Run("should return duplicate subscription error on existing id", func(t *testing.T) {
-		handler := func(_ string, _ ...any) error {
+	t.Run("should return invalid channel pattern error", func(t *testing.T) {
+		handler := func(_ ...any) error {
 			return nil
 		}
 
-		ps := flam.NewPubSub[string, string]()
+		ps := flam.NewPubSub()
 		require.NotNil(t, ps)
 
-		assert.NoError(t, ps.Subscribe("id", "channel", handler))
-		assert.ErrorIs(t, ps.Subscribe("id", "channel", handler), flam.ErrDuplicateSubscription)
+		assert.Error(t, ps.Subscribe("id", "[channel", handler))
+	})
+
+	t.Run("should return duplicate subscription error on existing id", func(t *testing.T) {
+		handler := func(_ ...any) error {
+			return nil
+		}
+
+		ps := flam.NewPubSub()
+		require.NotNil(t, ps)
+
+		assert.NoError(t, ps.Subscribe("id", "channel-1", handler))
+		assert.ErrorIs(t, ps.Subscribe("id", "channel-2", handler), flam.ErrDuplicateSubscription)
 	})
 
 	t.Run("should correctly subscribe the channel", func(t *testing.T) {
 		var called bool
-		handler := func(channel string, _ ...any) error {
-			assert.Equal(t, "channel", channel)
-
+		handler := func(_ ...any) error {
 			called = true
 			return nil
 		}
 
-		ps := flam.NewPubSub[string, string]()
+		ps := flam.NewPubSub()
 		require.NotNil(t, ps)
 
 		assert.NoError(t, ps.Subscribe("id", "channel", handler))
@@ -48,90 +57,86 @@ func Test_PubSub_Subscribe(t *testing.T) {
 func Test_PubSub_Unsubscribe(t *testing.T) {
 	t.Run("should unsubscribe channel", func(t *testing.T) {
 		var called bool
-		handler := func(channel string, _ ...any) error {
-			assert.Equal(t, "channel", channel)
-
+		handler := func(_ ...any) error {
 			called = true
 			return nil
 		}
 
-		ps := flam.NewPubSub[string, string]()
+		ps := flam.NewPubSub()
 		require.NotNil(t, ps)
 
 		assert.NoError(t, ps.Subscribe("id", "channel", handler))
-		assert.NoError(t, ps.Unsubscribe("id", "channel"))
+		assert.NoError(t, ps.Unsubscribe("id"))
 		assert.NoError(t, ps.Publish("channel"))
 
 		assert.False(t, called)
 	})
 
-	t.Run("should return subscription not found when unsubscribe from non-existent channel", func(t *testing.T) {
-		ps := flam.NewPubSub[string, string]()
-		require.NotNil(t, ps)
-
-		assert.ErrorIs(t, ps.Unsubscribe("id", "channel"), flam.ErrSubscriptionNotFound)
-	})
-
 	t.Run("should return subscription not found when unsubscribe from non-existent id", func(t *testing.T) {
-		handler := func(_ string, _ ...any) error {
+		handler := func(_ ...any) error {
 			return nil
 		}
 
-		ps := flam.NewPubSub[string, string]()
+		ps := flam.NewPubSub()
 		require.NotNil(t, ps)
 
 		assert.NoError(t, ps.Subscribe("id1", "channel", handler))
-		assert.ErrorIs(t, ps.Unsubscribe("id2", "channel"), flam.ErrSubscriptionNotFound)
+		assert.ErrorIs(t, ps.Unsubscribe("id2"), flam.ErrSubscriptionNotFound)
 	})
 }
 
 func Test_PubSub_Publish(t *testing.T) {
 	t.Run("should publish to channel with no subscribers without error", func(t *testing.T) {
-		ps := flam.NewPubSub[string, string]()
+		ps := flam.NewPubSub()
 		require.NotNil(t, ps)
 
 		assert.NoError(t, ps.Publish("channel", "data"))
 	})
 
 	t.Run("should publish with data without error", func(t *testing.T) {
-		handler := func(channel string, data ...any) error {
-			assert.Equal(t, "channel", channel)
+		published := false
+		handler := func(data ...any) error {
 			assert.Equal(t, []any{"hello", 123}, data)
+			published = true
 
 			return nil
 		}
 
-		ps := flam.NewPubSub[string, string]()
+		ps := flam.NewPubSub()
 		require.NotNil(t, ps)
 
 		assert.NoError(t, ps.Subscribe("id", "channel", handler))
 		assert.NoError(t, ps.Publish("channel", "hello", 123))
+		assert.True(t, published)
 	})
 
 	t.Run("should return error if handler returns error", func(t *testing.T) {
-		handler1 := func(channel string, data ...any) error {
-			assert.Equal(t, "channel", channel)
+		published1 := false
+		handler1 := func(data ...any) error {
 			assert.Equal(t, "data", data[0])
+			published1 = true
 
 			return nil
 		}
 
+		published2 := false
 		expectedErr := errors.New("handler error")
-		handler2 := func(channel string, data ...any) error {
-			assert.Equal(t, "channel", channel)
+		handler2 := func(data ...any) error {
 			assert.Equal(t, "data", data[0])
+			published2 = true
 
 			return expectedErr
 		}
 
-		handler3 := func(channel string, data ...any) error {
-			assert.Equal(t, "channel", channel)
+		published3 := false
+		handler3 := func(data ...any) error {
 			assert.Equal(t, "data", data[0])
+			published3 = true
 
 			return nil
 		}
 
-		ps := flam.NewPubSub[string, string]()
+		ps := flam.NewPubSub()
 		require.NotNil(t, ps)
 
 		assert.NoError(t, ps.Subscribe("id1", "channel", handler1))
@@ -139,6 +144,27 @@ func Test_PubSub_Publish(t *testing.T) {
 		assert.NoError(t, ps.Subscribe("id3", "channel", handler3))
 
 		assert.ErrorIs(t, ps.Publish("channel", "data"), expectedErr)
+
+		assert.True(t, published1)
+		assert.True(t, published2)
+		assert.False(t, published3)
+	})
+
+	t.Run("should publish to channel with handler is valid channel pattern", func(t *testing.T) {
+		published := false
+		handler := func(data ...any) error {
+			assert.Equal(t, []any{"hello", 123}, data)
+			published = true
+
+			return nil
+		}
+
+		ps := flam.NewPubSub()
+		require.NotNil(t, ps)
+
+		assert.NoError(t, ps.Subscribe("id", "/**/channel", handler))
+		assert.NoError(t, ps.Publish("/dir1/channel", "hello", 123))
+		assert.True(t, published)
 	})
 }
 
@@ -148,15 +174,13 @@ func Test_PubSub_concurrency(t *testing.T) {
 	publishCount := 10
 
 	var receivedCount int32
-	handler := func(channel string, _ ...any) error {
-		assert.Equal(t, "channel", channel)
-
+	handler := func(_ ...any) error {
 		atomic.AddInt32(&receivedCount, 1)
 
 		return nil
 	}
 
-	ps := flam.NewPubSub[string, string]()
+	ps := flam.NewPubSub()
 	require.NotNil(t, ps)
 
 	// Concurrent Subscribe
@@ -184,7 +208,7 @@ func Test_PubSub_concurrency(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			assert.NoError(t, ps.Unsubscribe(fmt.Sprintf("sub-%d", i), "channel"))
+			assert.NoError(t, ps.Unsubscribe(fmt.Sprintf("sub-%d", i)))
 		}(i)
 	}
 	wg.Wait()

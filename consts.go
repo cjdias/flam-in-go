@@ -86,7 +86,7 @@ const (
 	DefaultMigratorLoggerChannel     = "flam"
 	DefaultMigratorLoggerStartLevel  = LogInfo
 	DefaultMigratorLoggerErrorLevel  = LogError
-	DefaultMigratorLoggetDoneLevel   = LogInfo
+	DefaultMigratorLoggerDoneLevel   = LogInfo
 	DefaultRedisMiniBoot             = false
 	DefaultRedisHost                 = "127.0.0.1"
 	DefaultRedisPort                 = 6379
