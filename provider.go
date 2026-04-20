@@ -50,7 +50,7 @@ func (*provider) Register(
 	container *dig.Container,
 ) error {
 	return NewRegisterer().
-		Queue(func() PubSub { return NewPubSub() }).
+		Queue(func() PubSub[string, string] { return NewPubSub[string, string]() }).
 		Queue(newTimer).
 		Queue(newTriggerFactory).
 		Queue(newDiskFactory).
@@ -123,6 +123,7 @@ func (*provider) Register(
 func (*provider) Config(
 	config *Bag,
 ) error {
+	// Errors ignored - setting default values, shouldn't block configuration
 	_ = config.Set(PathConfigBoot, DefaultConfigBoot)
 	_ = config.Set(PathConfigObserverFrequency, DefaultConfigObserverFrequency)
 	_ = config.Set(PathConfigDefaultFileParserId, DefaultConfigFileParserId)

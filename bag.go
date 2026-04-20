@@ -21,11 +21,10 @@ func (bag *Bag) Clone() Bag {
 			}
 
 			return result
-		case Bag:
-			return typedValue.Clone()
-		case *Bag:
-			return typedValue.Clone()
 		default:
+			if b, ok := asBag(typedValue); ok {
+				return b.Clone()
+			}
 			return value
 		}
 	}
@@ -71,198 +70,126 @@ func (bag *Bag) Bool(
 	path string,
 	def ...bool,
 ) bool {
-	if val, ok := bag.Get(path).(bool); ok {
-		return val
-	}
-
-	return append(def, false)[0]
+	return get(bag, path, def...)
 }
 
 func (bag *Bag) Int(
 	path string,
 	def ...int,
 ) int {
-	if val, ok := bag.Get(path).(int); ok {
-		return val
-	}
-
-	return append(def, 0)[0]
+	return get(bag, path, def...)
 }
 
 func (bag *Bag) Int8(
 	path string,
 	def ...int8,
 ) int8 {
-	if val, ok := bag.Get(path).(int8); ok {
-		return val
-	}
-
-	return append(def, 0)[0]
+	return get(bag, path, def...)
 }
 
 func (bag *Bag) Int16(
 	path string,
 	def ...int16,
 ) int16 {
-	if val, ok := bag.Get(path).(int16); ok {
-		return val
-	}
-
-	return append(def, 0)[0]
+	return get(bag, path, def...)
 }
 
 func (bag *Bag) Int32(
 	path string,
 	def ...int32,
 ) int32 {
-	if val, ok := bag.Get(path).(int32); ok {
-		return val
-	}
-
-	return append(def, 0)[0]
+	return get(bag, path, def...)
 }
 
 func (bag *Bag) Int64(
 	path string,
 	def ...int64,
 ) int64 {
-	if val, ok := bag.Get(path).(int64); ok {
-		return val
-	}
-
-	return append(def, 0)[0]
+	return get(bag, path, def...)
 }
 
 func (bag *Bag) Uint(
 	path string,
 	def ...uint,
 ) uint {
-	if val, ok := bag.Get(path).(uint); ok {
-		return val
-	}
-
-	return append(def, 0)[0]
+	return get(bag, path, def...)
 }
 
 func (bag *Bag) Uint8(
 	path string,
 	def ...uint8,
 ) uint8 {
-	if val, ok := bag.Get(path).(uint8); ok {
-		return val
-	}
-
-	return append(def, 0)[0]
+	return get(bag, path, def...)
 }
 
 func (bag *Bag) Uint16(
 	path string,
 	def ...uint16,
 ) uint16 {
-	if val, ok := bag.Get(path).(uint16); ok {
-		return val
-	}
-
-	return append(def, 0)[0]
+	return get(bag, path, def...)
 }
 
 func (bag *Bag) Uint32(
 	path string,
 	def ...uint32,
 ) uint32 {
-	if val, ok := bag.Get(path).(uint32); ok {
-		return val
-	}
-
-	return append(def, 0)[0]
+	return get(bag, path, def...)
 }
 
 func (bag *Bag) Uint64(
 	path string,
 	def ...uint64,
 ) uint64 {
-	if val, ok := bag.Get(path).(uint64); ok {
-		return val
-	}
-
-	return append(def, 0)[0]
+	return get(bag, path, def...)
 }
 
 func (bag *Bag) Float32(
 	path string,
 	def ...float32,
 ) float32 {
-	if val, ok := bag.Get(path).(float32); ok {
-		return val
-	}
-
-	return append(def, 0)[0]
+	return get(bag, path, def...)
 }
 
 func (bag *Bag) Float64(
 	path string,
 	def ...float64,
 ) float64 {
-	if val, ok := bag.Get(path).(float64); ok {
-		return val
-	}
-
-	return append(def, 0)[0]
+	return get(bag, path, def...)
 }
 
 func (bag *Bag) String(
 	path string,
 	def ...string,
 ) string {
-	if val, ok := bag.Get(path).(string); ok {
-		return val
-	}
-
-	return append(def, "")[0]
+	return get(bag, path, def...)
 }
 
 func (bag *Bag) StringMap(
 	path string,
 	def ...map[string]any,
 ) map[string]any {
-	if val, ok := bag.Get(path).(map[string]any); ok {
-		return val
-	}
-
-	return append(def, nil)[0]
+	return get(bag, path, def...)
 }
 
 func (bag *Bag) StringMapString(
 	path string,
 	def ...map[string]string,
 ) map[string]string {
-	if val, ok := bag.Get(path).(map[string]string); ok {
-		return val
-	}
-
-	return append(def, nil)[0]
+	return get(bag, path, def...)
 }
 
 func (bag *Bag) Slice(
 	path string,
 	def ...[]any,
 ) []any {
-	if val, ok := bag.Get(path).([]any); ok {
-		return val
-	}
-
-	return append(def, nil)[0]
+	return get(bag, path, def...)
 }
 
 func (bag *Bag) StringSlice(
 	path string,
 	def ...[]string,
 ) []string {
-	if val, ok := bag.Get(path).([]string); ok {
-		return val
-	}
-
-	return append(def, nil)[0]
+	return get(bag, path, def...)
 }
 
 func (bag *Bag) Duration(
@@ -277,23 +204,15 @@ func (bag *Bag) Duration(
 	case time.Duration:
 		return tval
 	default:
-		if len(def) != 0 {
-			return def[0]
-		}
+		return append(def, time.Duration(0))[0]
 	}
-
-	return time.Duration(0)
 }
 
 func (bag *Bag) Bag(
 	path string,
 	def ...Bag,
 ) Bag {
-	if val, ok := bag.Get(path).(Bag); ok {
-		return val
-	}
-
-	return append(def, nil)[0]
+	return get(bag, path, def...)
 }
 
 func (bag *Bag) Set(
@@ -344,30 +263,15 @@ func (bag *Bag) Merge(
 	src Bag,
 ) *Bag {
 	for key, value := range src {
-		switch tValue := value.(type) {
-		case Bag:
-			switch tLocal := (*bag)[key].(type) {
-			case Bag:
-				tLocal.Merge(tValue)
-			case *Bag:
-				tLocal.Merge(tValue)
-			default:
+		if srcBag, ok := asBag(value); ok {
+			if localBag, ok := asBag((*bag)[key]); ok {
+				localBag.Merge(srcBag)
+			} else {
 				v := Bag{}
-				v.Merge(tValue)
+				v.Merge(srcBag)
 				(*bag)[key] = v
 			}
-		case *Bag:
-			switch tLocal := (*bag)[key].(type) {
-			case Bag:
-				tLocal.Merge(*tValue)
-			case *Bag:
-				tLocal.Merge(*tValue)
-			default:
-				v := Bag{}
-				v.Merge(*tValue)
-				(*bag)[key] = v
-			}
-		default:
+		} else {
 			(*bag)[key] = value
 		}
 	}
@@ -391,7 +295,6 @@ func (bag *Bag) Populate(
 func (bag *Bag) path(
 	path string,
 ) (any, error) {
-	var ok bool
 	var it any
 
 	it = *bag
@@ -400,16 +303,11 @@ func (bag *Bag) path(
 			continue
 		}
 
-		switch typedIt := it.(type) {
-		case Bag:
-			if it, ok = typedIt[part]; !ok {
+		if b, ok := asBag(it); ok {
+			if it, ok = b[part]; !ok {
 				return nil, newErrBagInvalidPath(path)
 			}
-		case *Bag:
-			if it, ok = (*typedIt)[part]; !ok {
-				return nil, newErrBagInvalidPath(path)
-			}
-		default:
+		} else {
 			return nil, newErrBagInvalidPath(path)
 		}
 	}
@@ -417,20 +315,9 @@ func (bag *Bag) path(
 	return it, nil
 }
 
-// -----------------------------------------------------------------------------
-
 func BagNormalization(
 	val any,
 ) any {
-	if pValue, ok := val.(Bag); ok {
-		result := Bag{}
-		for k, value := range pValue {
-			result[strings.ToLower(k)] = BagNormalization(value)
-		}
-
-		return result
-	}
-
 	if lValue, ok := val.([]any); ok {
 		var result []any
 		for _, i := range lValue {
@@ -440,7 +327,16 @@ func BagNormalization(
 		return result
 	}
 
-	if mValue, ok := val.(map[string]any); ok {
+	var mValue map[string]any
+	if pValue, ok := val.(Bag); ok {
+		mValue = pValue
+	} else if mValue, ok = val.(map[string]any); ok {
+		// mValue already set
+	} else {
+		mValue = nil
+	}
+
+	if mValue != nil {
 		result := Bag{}
 		for k, i := range mValue {
 			result[strings.ToLower(k)] = BagNormalization(i)

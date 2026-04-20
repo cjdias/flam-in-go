@@ -2,7 +2,6 @@ package flam
 
 import (
 	"io"
-	"slices"
 	"sync"
 
 	"go.uber.org/dig"
@@ -26,6 +25,7 @@ type kennelReg struct {
 }
 
 type kennel struct {
+	mu                    sync.Mutex
 	config                Config
 	watchdogLoggerFactory WatchdogLoggerFactory
 	regs                  map[string]kennelReg
@@ -72,6 +72,9 @@ func newKennel(args struct {
 }
 
 func (kennel *kennel) Close() error {
+	kennel.mu.Lock()
+	defer kennel.mu.Unlock()
+
 	for _, reg := range kennel.regs {
 		if reg.watchdog != nil {
 			_ = reg.watchdog.Close()
@@ -82,6 +85,9 @@ func (kennel *kennel) Close() error {
 }
 
 func (kennel *kennel) Available() []string {
+	kennel.mu.Lock()
+	defer kennel.mu.Unlock()
+
 	var available []string
 	for id := range kennel.regs {
 		available = append(available, id)
@@ -93,12 +99,19 @@ func (kennel *kennel) Available() []string {
 func (kennel *kennel) Has(
 	id string,
 ) bool {
-	return slices.Contains(kennel.Available(), id)
+	kennel.mu.Lock()
+	defer kennel.mu.Unlock()
+
+	_, ok := kennel.regs[id]
+	return ok
 }
 
 func (kennel *kennel) IsActive(
 	id string,
 ) bool {
+	kennel.mu.Lock()
+	defer kennel.mu.Unlock()
+
 	reg, ok := kennel.regs[id]
 	if !ok {
 		return false
@@ -110,6 +123,9 @@ func (kennel *kennel) IsActive(
 func (kennel *kennel) Activate(
 	id string,
 ) error {
+	kennel.mu.Lock()
+	defer kennel.mu.Unlock()
+
 	reg, ok := kennel.regs[id]
 	switch {
 	case !ok:
@@ -124,6 +140,9 @@ func (kennel *kennel) Activate(
 func (kennel *kennel) Deactivate(
 	id string,
 ) error {
+	kennel.mu.Lock()
+	defer kennel.mu.Unlock()
+
 	reg, ok := kennel.regs[id]
 	switch {
 	case !ok:
@@ -140,8 +159,11 @@ func (kennel *kennel) run() error {
 		return nil
 	}
 
+	kennel.mu.Lock()
 	var result error
-	wg := sync.WaitGroup{}
+	var wg sync.WaitGroup
+	errorChan := make(chan error, len(kennel.regs))
+
 	for id, reg := range kennel.regs {
 		if !reg.config.Bool("active", false) {
 			continue
@@ -158,11 +180,20 @@ func (kennel *kennel) run() error {
 		go func(watchdog *watchdog) {
 			defer wg.Done()
 			if e := watchdog.Run(); e != nil {
-				result = e
+				errorChan <- e
 			}
 		}(wd)
 	}
-	wg.Wait()
+	kennel.mu.Unlock()
+
+	go func() {
+		wg.Wait()
+		close(errorChan)
+	}()
+
+	for e := range errorChan {
+		result = e
+	}
 
 	return result
 }

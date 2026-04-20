@@ -52,9 +52,11 @@ func (observer *configObserver) Boot() error {
 			}
 
 			if observer.trigger != nil {
+				// Error ignored - trigger close is cleanup, shouldn't block observer update
 				_ = observer.trigger.Close()
 			}
 
+			// Error ignored - if trigger creation fails, observer will continue without polling
 			observer.trigger, _ = observer.triggerFactory.NewRecurring(newFrequency, observer.Callback)
 		},
 	); e != nil {

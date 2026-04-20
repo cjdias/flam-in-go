@@ -77,12 +77,8 @@ func (factory *factory[R]) Close() error {
 	factory.locker.Lock()
 	defer factory.locker.Unlock()
 
-	for _, entry := range factory.entries {
-		if closer, ok := any(entry).(io.Closer); ok {
-			if e := closer.Close(); e != nil {
-				return e
-			}
-		}
+	if e := factory.closeEntries(factory.entries); e != nil {
+		return e
 	}
 
 	factory.entries = map[string]R{}
@@ -147,11 +143,10 @@ func (factory *factory[R]) Store(
 	id string,
 	resource R,
 ) error {
-	switch {
-	case any(resource) == nil,
-		reflect.ValueOf(resource).IsNil():
+	if isNil(resource) {
 		return newErrNilReference("resource")
-	case factory.Has(id):
+	}
+	if factory.Has(id) {
 		return newErrDuplicateResource(id)
 	}
 
@@ -175,6 +170,7 @@ func (factory *factory[R]) Generate(
 	if config == nil {
 		return zero, newErrUnknownResource(reflect.TypeFor[R]().Name(), id)
 	}
+	// Error ignored - setting id is informational, failure shouldn't block generation
 	_ = config.Set("id", id)
 
 	if factory.factoryConfigValidator != nil {
@@ -200,6 +196,9 @@ func (factory *factory[R]) Generate(
 }
 
 func (factory *factory[R]) GenerateAll() error {
+	factory.locker.Lock()
+	defer factory.locker.Unlock()
+
 	factoryConfig := factory.factoryConfig.Get(factory.factoryConfigPath)
 	ids := factoryConfig.Entries()
 	for _, id := range ids {
@@ -207,7 +206,11 @@ func (factory *factory[R]) GenerateAll() error {
 			continue
 		}
 
-		if _, e := factory.Generate(id); e != nil {
+		// Unlock before calling Generate to avoid deadlock
+		factory.locker.Unlock()
+		_, e := factory.Generate(id)
+		factory.locker.Lock()
+		if e != nil {
 			return e
 		}
 	}
@@ -226,10 +229,9 @@ func (factory *factory[R]) Remove(
 		return newErrUnknownResource(reflect.TypeFor[R]().Name(), id)
 	}
 
-	if closer, ok := any(entry).(io.Closer); ok {
-		if e := closer.Close(); e != nil {
-			return e
-		}
+	singleEntry := map[string]R{id: entry}
+	if e := factory.closeEntries(singleEntry); e != nil {
+		return e
 	}
 
 	delete(factory.entries, id)
@@ -241,15 +243,26 @@ func (factory *factory[R]) RemoveAll() error {
 	factory.locker.Lock()
 	defer factory.locker.Unlock()
 
-	for _, entry := range factory.entries {
-		if closer, ok := any(entry).(io.Closer); ok {
-			if e := closer.Close(); e != nil {
-				return e
-			}
-		}
+	if e := factory.closeEntries(factory.entries); e != nil {
+		return e
 	}
 
 	factory.entries = map[string]R{}
 
+	return nil
+}
+
+func (factory *factory[R]) closeEntries(entries map[string]R) error {
+	var errors []error
+	for _, entry := range entries {
+		if closer, ok := any(entry).(io.Closer); ok {
+			if e := closer.Close(); e != nil {
+				errors = append(errors, e)
+			}
+		}
+	}
+	if len(errors) > 0 {
+		return newErrPublishFailed(errors)
+	}
 	return nil
 }

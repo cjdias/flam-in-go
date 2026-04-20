@@ -29,14 +29,9 @@ func NewError(
 	msg string,
 	ctx ...Bag,
 ) Error {
-	context := Bag{}
-	for _, c := range ctx {
-		context.Merge(c)
-	}
-
 	return &err{
 		base:    errors.New(msg),
-		context: context}
+		context: mergeContext(ctx...)}
 }
 
 func NewErrorFrom(
@@ -44,14 +39,9 @@ func NewErrorFrom(
 	msg string,
 	ctx ...Bag,
 ) Error {
-	context := Bag{}
-	for _, c := range ctx {
-		context.Merge(c)
-	}
-
 	return &err{
 		base:    fmt.Errorf("%w: %s", e, msg),
-		context: context}
+		context: mergeContext(ctx...)}
 }
 
 func (e *err) Error() string {
@@ -75,13 +65,15 @@ func (e *err) SetCode(
 }
 
 func (e *err) Context() *Bag {
-	return &e.context
+	clone := e.context.Clone()
+	return &clone
 }
 
 func (e *err) Set(
 	path string,
 	value any,
 ) Error {
+	// Error ignored - setting context values, shouldn't block error handling
 	_ = e.context.Set(path, value)
 
 	return e

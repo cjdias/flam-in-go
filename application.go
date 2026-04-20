@@ -17,7 +17,7 @@ type Application interface {
 }
 
 type application struct {
-	locker    sync.Locker
+	mu        sync.Mutex
 	config    Bag
 	container *dig.Container
 	providers []Provider
@@ -30,7 +30,6 @@ func NewApplication(
 	config ...Bag,
 ) Application {
 	app := &application{
-		locker:    &sync.Mutex{},
 		config:    append(config, Bag{})[0],
 		container: dig.New(),
 		providers: []Provider{},
@@ -46,6 +45,9 @@ func (app *application) Container() *dig.Container {
 }
 
 func (app *application) HasProvider(id string) bool {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
 	for _, registered := range app.providers {
 		if registered.Id() == id {
 			return true
@@ -62,8 +64,8 @@ func (app *application) Register(
 		return newErrNilReference("provider")
 	}
 
-	app.locker.Lock()
-	defer app.locker.Unlock()
+	app.mu.Lock()
+	defer app.mu.Unlock()
 
 	for _, registered := range app.providers {
 		if registered.Id() == provider.Id() {
@@ -81,12 +83,12 @@ func (app *application) Register(
 }
 
 func (app *application) Boot() error {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
 	if app.isBooted {
 		return nil
 	}
-
-	app.locker.Lock()
-	defer app.locker.Unlock()
 
 	config := &Bag{}
 	for _, provider := range app.providers {
@@ -96,11 +98,11 @@ func (app *application) Boot() error {
 			}
 		}
 	}
-	config = config.Merge(app.config)
+	config.Merge(app.config)
 
 	if e := app.container.Invoke(func(factory ConfigSourceFactory) error {
 		source := &configSource{
-			mutex:    &sync.Mutex{},
+			mu:       sync.Mutex{},
 			bag:      *config,
 			priority: DefaultConfigPriority}
 		return factory.Store(DefaultConfigSourceId, source)
@@ -128,8 +130,8 @@ func (app *application) Run() error {
 		}
 	}
 
-	app.locker.Lock()
-	defer app.locker.Unlock()
+	app.mu.Lock()
+	defer app.mu.Unlock()
 
 	for _, provider := range app.providers {
 		if runnable, ok := provider.(RunnableProvider); ok {
@@ -143,16 +145,20 @@ func (app *application) Run() error {
 }
 
 func (app *application) Close() error {
-	app.locker.Lock()
-	defer app.locker.Unlock()
+	app.mu.Lock()
+	defer app.mu.Unlock()
 
 	slices.Reverse(app.providers)
+	var errors []error
 	for _, provider := range app.providers {
 		if closable, ok := provider.(ClosableProvider); ok {
 			if e := closable.Close(app.container); e != nil {
-				return e
+				errors = append(errors, e)
 			}
 		}
+	}
+	if len(errors) > 0 {
+		return newErrPublishFailed(errors)
 	}
 
 	return nil

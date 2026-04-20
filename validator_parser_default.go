@@ -3,11 +3,13 @@ package flam
 import (
 	"reflect"
 	"strconv"
+	"sync"
 
 	"github.com/go-playground/validator/v10"
 )
 
 type defaultValidatorParser struct {
+	mu         sync.RWMutex
 	annotation string
 	translator Translator
 	mapper     map[string]int
@@ -151,6 +153,8 @@ func (parser *defaultValidatorParser) AddTagCode(
 	tag string,
 	code int,
 ) {
+	parser.mu.Lock()
+	defer parser.mu.Unlock()
 	parser.mapper[tag] = code
 }
 
@@ -158,6 +162,9 @@ func (parser *defaultValidatorParser) Parse(
 	value any,
 	verrs validator.ValidationErrors,
 ) []ValidationError {
+	parser.mu.RLock()
+	defer parser.mu.RUnlock()
+
 	var validationErrors []ValidationError
 
 	for _, verr := range verrs {

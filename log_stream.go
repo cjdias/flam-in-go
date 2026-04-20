@@ -4,6 +4,7 @@ import (
 	"io"
 	"slices"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -24,6 +25,7 @@ type LogStream interface {
 }
 
 type logStream struct {
+	mu            sync.Mutex
 	level         LogLevel
 	channels      []string
 	logSerializer LogSerializer
@@ -63,6 +65,8 @@ func (stream *logStream) GetLevel() LogLevel {
 func (stream *logStream) SetLevel(
 	level LogLevel,
 ) error {
+	stream.mu.Lock()
+	defer stream.mu.Unlock()
 	stream.level = level
 
 	return nil
@@ -71,17 +75,23 @@ func (stream *logStream) SetLevel(
 func (stream *logStream) HasChannel(
 	channel string,
 ) bool {
+	stream.mu.Lock()
+	defer stream.mu.Unlock()
 	return slices.Contains(stream.channels, channel)
 }
 
 func (stream *logStream) ListChannels() []string {
+	stream.mu.Lock()
+	defer stream.mu.Unlock()
 	return stream.channels
 }
 
 func (stream *logStream) AddChannel(
 	channel string,
 ) error {
-	if !stream.HasChannel(channel) {
+	stream.mu.Lock()
+	defer stream.mu.Unlock()
+	if !slices.Contains(stream.channels, channel) {
 		stream.channels = append(stream.channels, channel)
 		sort.Strings(stream.channels)
 	}
@@ -92,6 +102,8 @@ func (stream *logStream) AddChannel(
 func (stream *logStream) RemoveChannel(
 	channel string,
 ) error {
+	stream.mu.Lock()
+	defer stream.mu.Unlock()
 	stream.channels = slices.DeleteFunc(stream.channels, func(c string) bool {
 		return c == channel
 	})
@@ -100,6 +112,8 @@ func (stream *logStream) RemoveChannel(
 }
 
 func (stream *logStream) RemoveAllChannels() error {
+	stream.mu.Lock()
+	defer stream.mu.Unlock()
 	stream.channels = []string{}
 
 	return nil
@@ -140,6 +154,8 @@ func (stream *logStream) Broadcast(
 func (stream *logStream) acceptChannel(
 	channel string,
 ) bool {
+	stream.mu.Lock()
+	defer stream.mu.Unlock()
 	i := sort.SearchStrings(stream.channels, "*")
 	if i != len(stream.channels) && stream.channels[i] == "*" {
 		return true

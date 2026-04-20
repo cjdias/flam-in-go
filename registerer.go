@@ -29,6 +29,10 @@ func (registerer *registerer) Queue(
 	constructor any,
 	opts ...dig.ProvideOption,
 ) Registerer {
+	if constructor == nil {
+		return registerer
+	}
+
 	registerer.entries = append(
 		registerer.entries,
 		registererEntry{

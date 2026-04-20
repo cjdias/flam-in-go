@@ -25,7 +25,7 @@ func newDirConfigSource(
 ) (ConfigSource, error) {
 	source := &dirConfigSource{
 		configSource: configSource{
-			mutex:    &sync.Mutex{},
+			mu:       sync.Mutex{},
 			bag:      Bag{},
 			priority: priority},
 		disk:         disk,
@@ -46,9 +46,9 @@ func (source *dirConfigSource) load() error {
 		return e
 	}
 
-	source.mutex.Lock()
+	source.mu.Lock()
 	source.bag = bag
-	source.mutex.Unlock()
+	source.mu.Unlock()
 
 	return nil
 }

@@ -27,6 +27,10 @@ func NewExecutor() Executor {
 func (executor *executor) Queue(
 	callback any,
 ) Executor {
+	if callback == nil {
+		return executor
+	}
+
 	executor.entries = append(
 		executor.entries,
 		executorEntry{
@@ -42,10 +46,14 @@ func (executor *executor) Run(
 		return newErrNilReference("container")
 	}
 
+	var errors []error
 	for _, entry := range executor.entries {
 		if e := container.Invoke(entry.callback); e != nil {
-			return e
+			errors = append(errors, e)
 		}
+	}
+	if len(errors) > 0 {
+		return newErrPublishFailed(errors)
 	}
 
 	return nil

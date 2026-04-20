@@ -20,7 +20,7 @@ type ObservableConfigSource interface {
 }
 
 type configSource struct {
-	mutex    sync.Locker
+	mu       sync.Mutex
 	bag      Bag
 	priority int
 }
@@ -36,6 +36,8 @@ func (source *configSource) GetPriority() int {
 func (source *configSource) SetPriority(
 	priority int,
 ) {
+	source.mu.Lock()
+	defer source.mu.Unlock()
 	source.priority = priority
 }
 
@@ -43,8 +45,8 @@ func (source *configSource) Get(
 	path string,
 	def ...any,
 ) any {
-	source.mutex.Lock()
-	defer source.mutex.Unlock()
+	source.mu.Lock()
+	defer source.mu.Unlock()
 
 	return source.bag.Get(path, def...)
 }

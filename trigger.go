@@ -2,6 +2,7 @@ package flam
 
 import (
 	"io"
+	"sync"
 	"time"
 )
 
@@ -15,6 +16,7 @@ type Trigger interface {
 }
 
 type trigger struct {
+	mu        sync.Mutex
 	delay     time.Duration
 	isRunning bool
 	closer    func() error
@@ -28,6 +30,8 @@ func (trigger *trigger) Close() error {
 }
 
 func (trigger *trigger) IsRunning() bool {
+	trigger.mu.Lock()
+	defer trigger.mu.Unlock()
 	return trigger.isRunning
 }
 

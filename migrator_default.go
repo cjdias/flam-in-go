@@ -2,12 +2,14 @@ package flam
 
 import (
 	"slices"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
 )
 
 type defaultMigrator struct {
+	mu         sync.Mutex
 	connection DatabaseConnection
 	logger     MigratorLogger
 	migrations []Migration
@@ -34,6 +36,9 @@ func newDefaultMigrator(
 }
 
 func (migrator *defaultMigrator) List() ([]MigrationInfo, error) {
+	migrator.mu.Lock()
+	defer migrator.mu.Unlock()
+
 	installed, e := migrator.dao.List(migrator.connection)
 	if e != nil {
 		return nil, e
@@ -60,6 +65,9 @@ func (migrator *defaultMigrator) List() ([]MigrationInfo, error) {
 }
 
 func (migrator *defaultMigrator) Current() (*MigrationInfo, error) {
+	migrator.mu.Lock()
+	defer migrator.mu.Unlock()
+
 	last, e := migrator.dao.Last(migrator.connection)
 	switch {
 	case e != nil:
@@ -75,13 +83,23 @@ func (migrator *defaultMigrator) Current() (*MigrationInfo, error) {
 }
 
 func (migrator *defaultMigrator) CanUp() bool {
-	list, e := migrator.List()
+	migrator.mu.Lock()
+	defer migrator.mu.Unlock()
+
+	installed, e := migrator.dao.List(migrator.connection)
 	if e != nil {
 		return false
 	}
 
-	for _, migration := range list {
-		if migration.InstalledAt == nil {
+	for _, migration := range migrator.migrations {
+		var installedAt *time.Time
+		for _, m := range installed {
+			if m.Version == migration.Version() {
+				installedAt = &m.CreatedAt
+				break
+			}
+		}
+		if installedAt == nil {
 			return true
 		}
 	}
@@ -90,13 +108,23 @@ func (migrator *defaultMigrator) CanUp() bool {
 }
 
 func (migrator *defaultMigrator) CanDown() bool {
-	list, e := migrator.List()
+	migrator.mu.Lock()
+	defer migrator.mu.Unlock()
+
+	installed, e := migrator.dao.List(migrator.connection)
 	if e != nil {
 		return false
 	}
 
-	for _, migration := range list {
-		if migration.InstalledAt != nil {
+	for _, migration := range migrator.migrations {
+		var installedAt *time.Time
+		for _, m := range installed {
+			if m.Version == migration.Version() {
+				installedAt = &m.CreatedAt
+				break
+			}
+		}
+		if installedAt != nil {
 			return true
 		}
 	}
@@ -105,6 +133,9 @@ func (migrator *defaultMigrator) CanDown() bool {
 }
 
 func (migrator *defaultMigrator) Up() error {
+	migrator.mu.Lock()
+	defer migrator.mu.Unlock()
+
 	last, e := migrator.dao.Last(migrator.connection)
 	if e != nil {
 		return e
@@ -127,6 +158,9 @@ func (migrator *defaultMigrator) Up() error {
 }
 
 func (migrator *defaultMigrator) UpAll() error {
+	migrator.mu.Lock()
+	defer migrator.mu.Unlock()
+
 	last, e := migrator.dao.Last(migrator.connection)
 	if e != nil {
 		return e
@@ -147,6 +181,9 @@ func (migrator *defaultMigrator) UpAll() error {
 }
 
 func (migrator *defaultMigrator) Down() error {
+	migrator.mu.Lock()
+	defer migrator.mu.Unlock()
+
 	last, e := migrator.dao.Last(migrator.connection)
 	if e != nil {
 		return e
@@ -164,11 +201,15 @@ func (migrator *defaultMigrator) Down() error {
 }
 
 func (migrator *defaultMigrator) DownAll() error {
+	migrator.mu.Lock()
+	defer migrator.mu.Unlock()
+
 	if len(migrator.migrations) == 0 {
 		return nil
 	}
 
-	slices.Reverse(migrator.migrations)
+	reversed := slices.Clone(migrator.migrations)
+	slices.Reverse(reversed)
 
 	for {
 		last, e := migrator.dao.Last(migrator.connection)
@@ -179,9 +220,9 @@ func (migrator *defaultMigrator) DownAll() error {
 			return nil
 		}
 
-		for i, migration := range migrator.migrations {
+		for i, migration := range reversed {
 			if migration.Version() == last.Version {
-				e = migrator.down(migrator.migrations[i], last)
+				e = migrator.down(reversed[i], last)
 				if e != nil {
 					return e
 				}
