@@ -15,6 +15,7 @@ var (
 	ErrSubscriptionNotFound              = errors.New("subscription not found")
 	ErrDuplicateSubscription             = errors.New("duplicate subscription")
 	ErrInvalidSubscriptionChannelPattern = errors.New("invalid subscription channel pattern")
+	ErrPublishFailed                     = errors.New("publish failed")
 	ErrDuplicateProvider                 = errors.New("duplicate provider")
 	ErrRestConfigSourceConfigNotFound    = errors.New("config rest source config source data not found")
 	ErrInvalidRestConfigSourceConfig     = errors.New("invalid config rest source config source data")
@@ -70,22 +71,31 @@ func newErrDuplicateResource(
 	return NewErrorFrom(ErrDuplicateResource, id)
 }
 
-func newErrSubscriptionNotFound(
-	id string,
+func newErrSubscriptionNotFound[I comparable, C comparable](
+	id I,
+	channel C,
 ) error {
-	return NewErrorFrom(ErrSubscriptionNotFound, id)
+	return NewErrorFrom(ErrSubscriptionNotFound, fmt.Sprintf("%v", id))
 }
 
-func newErrDuplicateSubscription(
-	id string,
+func newErrDuplicateSubscription[I comparable, C comparable](
+	id I,
+	channel C,
 ) error {
-	return NewErrorFrom(ErrDuplicateSubscription, id)
+	return NewErrorFrom(ErrDuplicateSubscription, fmt.Sprintf("%v", id))
 }
 
 func newErrInvalidSubscriptionChannelPattern(
 	channel string,
 ) error {
 	return NewErrorFrom(ErrInvalidSubscriptionChannelPattern, channel)
+}
+
+func newErrPublishFailed(
+	errs []error,
+) error {
+	joinedErr := errors.Join(errs...)
+	return NewErrorFrom(joinedErr, fmt.Sprintf("%d handler(s) failed", len(errs)))
 }
 
 func newErrDuplicateProvider(

@@ -192,12 +192,14 @@ func (factory configSourceFactory) reload() {
 	data := Bag{}
 	for _, source := range sources {
 		sourceData := source.Get("", Bag{})
-		data.Merge(sourceData.(Bag))
+		if bag, ok := asBag(sourceData); ok {
+			data.Merge(bag)
+		}
 	}
 
-	factory.config.locker.Lock()
+	factory.config.mu.Lock()
 	factory.config.sourcesBag = data
-	factory.config.locker.Unlock()
+	factory.config.mu.Unlock()
 
 	factory.config.rebuild()
 }

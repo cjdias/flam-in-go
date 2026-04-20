@@ -24,7 +24,7 @@ func newEnvConfigSource(
 ) (ConfigSource, error) {
 	source := &envConfigSource{
 		configSource: configSource{
-			mutex:    &sync.Mutex{},
+			mu:       sync.Mutex{},
 			bag:      Bag{},
 			priority: priority},
 		files:    files,

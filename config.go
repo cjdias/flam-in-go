@@ -46,7 +46,7 @@ type configObserverReg struct {
 }
 
 type config struct {
-	locker       sync.Locker
+	mu           sync.Mutex
 	sourcesBag   Bag
 	managerBag   Bag
 	aggregateBag Bag
@@ -57,7 +57,6 @@ var _ Config = (*config)(nil)
 
 func newConfig() *config {
 	return &config{
-		locker:       &sync.Mutex{},
 		sourcesBag:   Bag{},
 		managerBag:   Bag{},
 		aggregateBag: Bag{},
@@ -65,14 +64,17 @@ func newConfig() *config {
 }
 
 func (config *config) Entries() []string {
+	config.mu.Lock()
+	defer config.mu.Unlock()
+
 	return config.aggregateBag.Entries()
 }
 
 func (config *config) Has(
 	path string,
 ) bool {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	return config.aggregateBag.Has(path)
 }
@@ -81,8 +83,8 @@ func (config *config) Get(
 	path string,
 	def ...any,
 ) any {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	return config.aggregateBag.Get(path, def...)
 }
@@ -91,8 +93,8 @@ func (config *config) Bool(
 	path string,
 	def ...bool,
 ) bool {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	return config.aggregateBag.Bool(path, def...)
 }
@@ -101,8 +103,8 @@ func (config *config) Int(
 	path string,
 	def ...int,
 ) int {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	return config.aggregateBag.Int(path, def...)
 }
@@ -111,8 +113,8 @@ func (config *config) Int8(
 	path string,
 	def ...int8,
 ) int8 {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	return config.aggregateBag.Int8(path, def...)
 }
@@ -121,8 +123,8 @@ func (config *config) Int16(
 	path string,
 	def ...int16,
 ) int16 {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	return config.aggregateBag.Int16(path, def...)
 }
@@ -131,8 +133,8 @@ func (config *config) Int32(
 	path string,
 	def ...int32,
 ) int32 {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	return config.aggregateBag.Int32(path, def...)
 }
@@ -141,8 +143,8 @@ func (config *config) Int64(
 	path string,
 	def ...int64,
 ) int64 {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	return config.aggregateBag.Int64(path, def...)
 }
@@ -151,8 +153,8 @@ func (config *config) Uint(
 	path string,
 	def ...uint,
 ) uint {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	return config.aggregateBag.Uint(path, def...)
 }
@@ -161,8 +163,8 @@ func (config *config) Uint8(
 	path string,
 	def ...uint8,
 ) uint8 {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	return config.aggregateBag.Uint8(path, def...)
 }
@@ -171,8 +173,8 @@ func (config *config) Uint16(
 	path string,
 	def ...uint16,
 ) uint16 {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	return config.aggregateBag.Uint16(path, def...)
 }
@@ -181,8 +183,8 @@ func (config *config) Uint32(
 	path string,
 	def ...uint32,
 ) uint32 {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	return config.aggregateBag.Uint32(path, def...)
 }
@@ -191,8 +193,8 @@ func (config *config) Uint64(
 	path string,
 	def ...uint64,
 ) uint64 {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	return config.aggregateBag.Uint64(path, def...)
 }
@@ -201,8 +203,8 @@ func (config *config) Float32(
 	path string,
 	def ...float32,
 ) float32 {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	return config.aggregateBag.Float32(path, def...)
 }
@@ -211,8 +213,8 @@ func (config *config) Float64(
 	path string,
 	def ...float64,
 ) float64 {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	return config.aggregateBag.Float64(path, def...)
 }
@@ -221,8 +223,8 @@ func (config *config) String(
 	path string,
 	def ...string,
 ) string {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	return config.aggregateBag.String(path, def...)
 }
@@ -231,8 +233,8 @@ func (config *config) StringMap(
 	path string,
 	def ...map[string]any,
 ) map[string]any {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	return config.aggregateBag.StringMap(path, def...)
 }
@@ -241,8 +243,8 @@ func (config *config) StringMapString(
 	path string,
 	def ...map[string]string,
 ) map[string]string {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	return config.aggregateBag.StringMapString(path, def...)
 }
@@ -251,8 +253,8 @@ func (config *config) Slice(
 	path string,
 	def ...[]any,
 ) []any {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	return config.aggregateBag.Slice(path, def...)
 }
@@ -261,8 +263,8 @@ func (config *config) StringSlice(
 	path string,
 	def ...[]string,
 ) []string {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	return config.aggregateBag.StringSlice(path, def...)
 }
@@ -271,8 +273,8 @@ func (config *config) Duration(
 	path string,
 	def ...time.Duration,
 ) time.Duration {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	return config.aggregateBag.Duration(path, def...)
 }
@@ -281,8 +283,8 @@ func (config *config) Bag(
 	path string,
 	def ...Bag,
 ) Bag {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	return config.aggregateBag.Bag(path, def...)
 }
@@ -291,12 +293,12 @@ func (config *config) Set(
 	path string,
 	value any,
 ) error {
+	config.mu.Lock()
+	defer config.mu.Unlock()
+
 	if e := config.managerBag.Set(path, value); e != nil {
 		return e
 	}
-
-	config.locker.Lock()
-	defer config.locker.Unlock()
 
 	config.rebuild()
 
@@ -304,8 +306,8 @@ func (config *config) Set(
 }
 
 func (config *config) Populate(target any, path ...string) error {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	return config.aggregateBag.Populate(target, path...)
 }
@@ -314,6 +316,9 @@ func (config *config) HasObserver(
 	id,
 	path string,
 ) bool {
+	config.mu.Lock()
+	defer config.mu.Unlock()
+
 	if reg, ok := config.observerRegs[path]; ok {
 		if _, ok := reg.callbacks[id]; ok {
 			return true
@@ -328,8 +333,8 @@ func (config *config) AddObserver(
 	path string,
 	observer ConfigObserver,
 ) error {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	if observer == nil {
 		return newErrNilReference("callback")
@@ -351,8 +356,8 @@ func (config *config) AddObserver(
 func (config *config) RemoveObserver(
 	id string,
 ) error {
-	config.locker.Lock()
-	defer config.locker.Unlock()
+	config.mu.Lock()
+	defer config.mu.Unlock()
 
 	for _, observer := range config.observerRegs {
 		delete(observer.callbacks, id)

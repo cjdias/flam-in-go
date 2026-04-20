@@ -23,7 +23,7 @@ func newFileConfigSource(
 ) (ConfigSource, error) {
 	source := &fileConfigSource{
 		configSource: configSource{
-			mutex:    &sync.Mutex{},
+			mu:       sync.Mutex{},
 			bag:      Bag{},
 			priority: priority},
 		disk:         disk,
@@ -49,8 +49,8 @@ func (source *fileConfigSource) load() error {
 		return e
 	}
 
-	source.mutex.Lock()
-	defer source.mutex.Unlock()
+	source.mu.Lock()
+	defer source.mu.Unlock()
 
 	source.bag = bag
 

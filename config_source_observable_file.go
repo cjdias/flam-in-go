@@ -25,7 +25,7 @@ func newObservableFileConfigSource(
 	source := &observableFileConfigSource{
 		fileConfigSource: fileConfigSource{
 			configSource: configSource{
-				mutex:    &sync.Mutex{},
+				mu:       sync.Mutex{},
 				bag:      Bag{},
 				priority: priority},
 			disk:         disk,

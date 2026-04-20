@@ -1,6 +1,9 @@
 package flam
 
+import "sync"
+
 type watchdog struct {
+	mu             sync.Mutex
 	isRunning      bool
 	process        Process
 	watchdogLogger WatchdogLogger
@@ -17,6 +20,9 @@ func newWatchdog(
 }
 
 func (watchdog *watchdog) Close() error {
+	watchdog.mu.Lock()
+	defer watchdog.mu.Unlock()
+
 	if watchdog.isRunning {
 		watchdog.process.Terminate()
 	}
@@ -44,7 +50,9 @@ func (watchdog *watchdog) Run() error {
 	}
 
 	watchdog.logStart()
+	watchdog.mu.Lock()
 	watchdog.isRunning = true
+	watchdog.mu.Unlock()
 	for {
 		e = runner()
 		if panicErr != nil {
@@ -56,7 +64,9 @@ func (watchdog *watchdog) Run() error {
 
 		break
 	}
+	watchdog.mu.Lock()
 	watchdog.isRunning = false
+	watchdog.mu.Unlock()
 	watchdog.logDone()
 
 	return e

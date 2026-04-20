@@ -53,9 +53,11 @@ func (flusher *logFlusher) Boot() error {
 			}
 
 			if flusher.trigger != nil {
+				// Error ignored - trigger close is cleanup, shouldn't block observer update
 				_ = flusher.trigger.Close()
 			}
 
+			// Error ignored - if trigger creation fails, flusher will continue without auto-flush
 			flusher.trigger, _ = flusher.triggerFactory.NewRecurring(newFrequency, flusher.Callback)
 		},
 	); e != nil {

@@ -1,6 +1,7 @@
 package flam
 
 import (
+	"sync"
 	"time"
 )
 
@@ -13,27 +14,39 @@ func newPulseTrigger(
 	}
 
 	timer := time.NewTimer(delay)
-	closeCh := make(chan struct{})
+	closeCh := make(chan struct{}, 1)
+	var closeOnce sync.Once
+	var cleanupMu sync.Mutex
+	cleanupStarted := false
 
 	var t *trigger
 	t = &trigger{
 		delay:     delay,
 		isRunning: true,
 		closer: func() error {
-			if t.isRunning {
+			t.mu.Lock()
+			defer t.mu.Unlock()
+			cleanupMu.Lock()
+			defer cleanupMu.Unlock()
+			if t.isRunning && !cleanupStarted {
 				t.isRunning = false
-				if timer != nil {
-					closeCh <- struct{}{}
+				select {
+				case closeCh <- struct{}{}:
+				default:
 				}
 			}
 			return nil
 		},
 		cleaner: func() error {
-			if timer != nil {
-				timer.Stop()
-				timer = nil
-				close(closeCh)
-			}
+			closeOnce.Do(func() {
+				cleanupMu.Lock()
+				cleanupStarted = true
+				cleanupMu.Unlock()
+				if timer != nil {
+					timer.Stop()
+					close(closeCh)
+				}
+			})
 			return nil
 		},
 	}
@@ -42,7 +55,9 @@ func newPulseTrigger(
 		if timer != nil {
 			select {
 			case <-timer.C:
-				_ = callback()
+				if e := callback(); e != nil {
+					_ = t.cleaner()
+				}
 			case <-closeCh:
 			}
 		}

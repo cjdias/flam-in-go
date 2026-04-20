@@ -28,7 +28,7 @@ func newObservableRestConfigSource(
 	source := &observableRestConfigSource{
 		restConfigSource: restConfigSource{
 			configSource: configSource{
-				mutex:    &sync.Mutex{},
+				mu:       sync.Mutex{},
 				bag:      Bag{},
 				priority: priority},
 			uri:              uri,
@@ -63,10 +63,10 @@ func (source *observableRestConfigSource) Reload() (bool, error) {
 			return false, e
 		}
 
-		source.mutex.Lock()
+		source.mu.Lock()
 		source.bag = bag
 		source.timestamp = timestamp
-		source.mutex.Unlock()
+		source.mu.Unlock()
 
 		return true, nil
 	}

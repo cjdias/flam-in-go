@@ -32,14 +32,13 @@ type loggerEntryReg struct {
 }
 
 type logger struct {
-	locker  sync.Locker
+	mu      sync.Mutex
 	streams map[string]LogStream
 	buffer  []loggerEntryReg
 }
 
 func newLogger() *logger {
 	return &logger{
-		locker:  &sync.Mutex{},
 		streams: map[string]LogStream{},
 		buffer:  []loggerEntryReg{}}
 }
@@ -59,8 +58,8 @@ func (logger *logger) Signal(
 		context.Merge(c)
 	}
 
-	logger.locker.Lock()
-	defer logger.locker.Unlock()
+	logger.mu.Lock()
+	defer logger.mu.Unlock()
 
 	logger.buffer = append(logger.buffer, loggerEntryReg{
 		timestamp: time.Now(),
@@ -128,8 +127,8 @@ func (logger *logger) Broadcast(
 		context.Merge(c)
 	}
 
-	logger.locker.Lock()
-	defer logger.locker.Unlock()
+	logger.mu.Lock()
+	defer logger.mu.Unlock()
 
 	logger.buffer = append(logger.buffer, loggerEntryReg{
 		timestamp: time.Now(),
@@ -182,8 +181,8 @@ func (logger *logger) BroadcastDebug(
 }
 
 func (logger *logger) Flush() error {
-	logger.locker.Lock()
-	defer logger.locker.Unlock()
+	logger.mu.Lock()
+	defer logger.mu.Unlock()
 
 	for _, entry := range logger.buffer {
 		for _, stream := range logger.streams {

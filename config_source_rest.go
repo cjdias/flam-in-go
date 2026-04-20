@@ -25,7 +25,7 @@ func newRestConfigSource(
 ) (ConfigSource, error) {
 	source := &restConfigSource{
 		configSource: configSource{
-			mutex:    &sync.Mutex{},
+			mu:       sync.Mutex{},
 			bag:      Bag{},
 			priority: priority},
 		configRestClient: configRestClient,
@@ -51,9 +51,9 @@ func (source *restConfigSource) load() error {
 		return e
 	}
 
-	source.mutex.Lock()
+	source.mu.Lock()
 	source.bag = bag
-	source.mutex.Unlock()
+	source.mu.Unlock()
 
 	return nil
 }
