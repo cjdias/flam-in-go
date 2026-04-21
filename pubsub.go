@@ -33,14 +33,16 @@ func (ps *pubsub[I, C]) Subscribe(
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
-	// Check if id already exists in any channel
-	for _, channelMap := range ps.handlers {
-		if _, ok := channelMap[id]; ok {
-			return newErrDuplicateSubscription(id, channel)
-		}
+	// ensure channel map exists
+	if _, ok := ps.handlers[channel]; !ok {
+		ps.handlers[channel] = map[I]PubSubHandler[I, C]{}
 	}
 
-	ps.ensureChannelMap(channel)
+	// check if id already exists in channel
+	if _, ok := ps.handlers[channel][id]; ok {
+		return newErrDuplicateSubscription(id, channel)
+	}
+
 	ps.handlers[channel][id] = handler
 
 	return nil
@@ -53,7 +55,9 @@ func (ps *pubsub[I, C]) Unsubscribe(
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
+	// check if channel exists
 	if subs, ok := ps.handlers[channel]; ok {
+		// check if id exists in channel
 		if _, ok = ps.handlers[channel][id]; ok {
 			delete(subs, id)
 
@@ -74,31 +78,47 @@ func (ps *pubsub[I, C]) Publish(
 	data ...any,
 ) error {
 	ps.mu.Lock()
-	defer ps.mu.Unlock()
 
+	// check if channel exists and copy handlers
 	subs, ok := ps.handlers[channel]
 	if !ok {
+		ps.mu.Unlock()
 		return nil
 	}
 
-	var errors []error
+	// Copy handlers to a slice to release the lock
+	handlers := make([]PubSubHandler[I, C], 0, len(subs))
 	for _, handler := range subs {
-		if e := handler(channel, data...); e != nil {
-			errors = append(errors, e)
-		}
+		handlers = append(handlers, handler)
+	}
+	ps.mu.Unlock()
+
+	// execute handlers asynchronously
+	var wg sync.WaitGroup
+	errorChan := make(chan error, len(handlers))
+
+	for _, handler := range handlers {
+		wg.Add(1)
+		go func(h PubSubHandler[I, C]) {
+			defer wg.Done()
+			if e := h(channel, data...); e != nil {
+				errorChan <- e
+			}
+		}(handler)
 	}
 
+	// wait for all handlers to complete
+	wg.Wait()
+	close(errorChan)
+
+	// collect errors
+	var errors []error
+	for e := range errorChan {
+		errors = append(errors, e)
+	}
 	if len(errors) > 0 {
 		return newErrPublishFailed(errors)
 	}
 
 	return nil
-}
-
-func (ps *pubsub[I, C]) ensureChannelMap(
-	channel C,
-) {
-	if _, ok := ps.handlers[channel]; !ok {
-		ps.handlers[channel] = map[I]PubSubHandler[I, C]{}
-	}
 }

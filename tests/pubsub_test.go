@@ -41,6 +41,30 @@ func Test_PubSub_Subscribe(t *testing.T) {
 
 		assert.True(t, called)
 	})
+
+	t.Run("should correctly subscribe the channel with different id", func(t *testing.T) {
+		var called1 bool
+		handler1 := func(_ string, _ ...any) error {
+			called1 = true
+			return nil
+		}
+
+		var called2 bool
+		handler2 := func(_ string, _ ...any) error {
+			called2 = true
+			return nil
+		}
+
+		ps := flam.NewPubSub[string, string]()
+		require.NotNil(t, ps)
+
+		assert.NoError(t, ps.Subscribe("id1", "channel", handler1))
+		assert.NoError(t, ps.Subscribe("id2", "channel", handler2))
+		assert.NoError(t, ps.Publish("channel"))
+
+		assert.True(t, called1)
+		assert.True(t, called2)
+	})
 }
 
 func Test_PubSub_Unsubscribe(t *testing.T) {
