@@ -94,6 +94,40 @@ func Test_Relay_Run(t *testing.T) {
 			[]string{"orders:1", "orders:2", "orders:3", "orders:4", "orders:5"})
 	})
 
+	t.Run("should wait for the poll delay when no message of a full batch could be claimed", func(t *testing.T) {
+		for name, claim := range map[string]func(db *gorm.DB, n int64){
+			"claim failing": func(db *gorm.DB, _ int64) { _ = db.AddError(errors.New("boom")) },
+			"claim lost": func(db *gorm.DB, n int64) {
+				_ = db.Session(&gorm.Session{NewDB: true}).Exec("UPDATE flam_outbox SET token = ?", fmt.Sprint("stolen-", n)).Error
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
+				e := newEnv(t, options{relay: container.Bag{outbox.ConfigFieldBatch: 2, outbox.ConfigFieldPoll: "1h"}})
+				r := e.relay(t, "outbox-main")
+				e.add(t, "a", "1")
+				e.add(t, "b", "1")
+				var claims atomic.Int64
+				inject(t, e.conn, "update", "claim", func(db *gorm.DB) {
+					if _, ok := updates(db)["token"]; ok {
+						claim(db, claims.Add(1))
+					}
+				})
+				done := run(t, r)
+				eventually(t, "waiting", func() bool { return e.clock.Timers() == 1 })
+				testutil.Equal(t, "claims", claims.Load(), int64(2))
+
+				e.clock.Advance(time.Hour)
+				eventually(t, "waiting again", func() bool { return claims.Load() == 4 && e.clock.Timers() == 1 })
+				stop(t, r, done)
+				testutil.Equal(t, "claims", claims.Load(), int64(4))
+				testutil.Equal(t, "published", len(e.fake.published()), 0)
+				for _, row := range e.rows(t) {
+					testutil.Equal(t, "SentAt", row.SentAt, (*time.Time)(nil))
+				}
+			})
+		}
+	})
+
 	t.Run("should hold back the later messages of a failing topic, keeping their order", func(t *testing.T) {
 		var failures atomic.Int64
 		e := newEnv(t, options{relay: container.Bag{outbox.ConfigFieldPoll: "500ms"}})

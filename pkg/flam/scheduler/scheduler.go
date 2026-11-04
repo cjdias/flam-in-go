@@ -81,10 +81,14 @@ func (s *scheduler) Id() string {
 // its schedule until the context is done or the scheduler is closed,
 // then stops, as Close tells, returning nil. It fails when a run is under
 // way, once the scheduler is closed, and when the trigger of a job cannot
-// be created.
+// be created. A nil context never ends.
 func (s *scheduler) Run(
 	ctx context.Context,
 ) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	s.mu.Lock()
 	switch {
 	case s.closed:

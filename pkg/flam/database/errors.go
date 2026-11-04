@@ -48,7 +48,7 @@ var (
 	// ErrRetry is the error wrapped, along with the error of the last
 	// attempt, by the error returned from [Retry] when the attempts are
 	// exhausted, and, along with the error of the context, when the
-	// context ends before the next attempt.
+	// context ends before an attempt, the first one included.
 	ErrRetry = errors.New("unable to complete with retries")
 
 	// ErrNilDialector is the error wrapped by the error returned from

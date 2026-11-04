@@ -53,19 +53,22 @@ func newLocker(t *testing.T, autoRefresh bool) (flam.ILocker, *testutil.Clock) {
 }
 
 // leading is a function of a leader process, telling the test the
-// context of each of its runs, and leading until it is done.
+// context of each of its runs, and leading until it is done, then
+// returning nil, or the error of its context, or its cause, when ending
+// is set.
 type leading struct {
 	started chan context.Context
+	ending  func(ctx context.Context) error
 }
 
 func newLeading() *leading {
-	return &leading{started: make(chan context.Context, 10)}
+	return &leading{started: make(chan context.Context, 10), ending: func(context.Context) error { return nil }}
 }
 
 func (l *leading) run(ctx context.Context) error {
 	l.started <- ctx
 	<-ctx.Done()
-	return nil
+	return l.ending(ctx)
 }
 
 // next returns the context of the next run, failing the test after 5s.
@@ -323,5 +326,76 @@ func Test_Process(t *testing.T) {
 		testutil.Error(t, err, lock.ErrClosed, "unable to acquire lock: locker closed",
 			map[string]any{lock.ErrorFieldID: "main", lock.ErrorFieldKey: "leader"})
 		testutil.Equal(t, "IsRunning()", p.IsRunning(), false)
+	})
+}
+
+func Test_Process_ContextError(t *testing.T) {
+	endings := map[string]func(context.Context) error{
+		"error":   func(ctx context.Context) error { return ctx.Err() },
+		"cause":   context.Cause,
+		"wrapped": func(ctx context.Context) error { return fmt.Errorf("leading: %w", ctx.Err()) },
+	}
+	for name, ending := range endings {
+		t.Run(name+": should campaign again once the leadership is lost", func(t *testing.T) {
+			l, clock := newLocker(t, false)
+			leading := newLeading()
+			leading.ending = ending
+			p := newProcess(t, "p", l, leading.run)
+			done := start(context.Background(), p)
+
+			first := leading.next(t)
+			waitTimers(t, clock, 1)
+			clock.Advance(ttl) // the lock is not refreshed
+			second := leading.next(t)
+			if first.Err() == nil {
+				t.Fatal("the context of the lost leadership is not done")
+			}
+			testutil.Equal(t, "fence", fence(t, second), int64(2))
+			select {
+			case err := <-done:
+				t.Fatalf("Run() = %v once the leadership is lost", err)
+			default:
+			}
+
+			testutil.NoError(t, p.Close())
+			testutil.NoError(t, result(t, done))
+		})
+
+		t.Run(name+": should return nil once closed", func(t *testing.T) {
+			l, _ := newLocker(t, true)
+			leading := newLeading()
+			leading.ending = ending
+			p := newProcess(t, "p", l, leading.run)
+			done := start(context.Background(), p)
+			leading.next(t)
+			testutil.NoError(t, p.Close())
+			testutil.NoError(t, result(t, done))
+		})
+
+		t.Run(name+": should return nil once the context of Run is done", func(t *testing.T) {
+			l, _ := newLocker(t, true)
+			leading := newLeading()
+			leading.ending = ending
+			p := newProcess(t, "p", l, leading.run)
+			ctx, cancel := context.WithCancelCause(context.Background())
+			done := start(ctx, p)
+			leading.next(t)
+			cancel(errBoom)
+			testutil.NoError(t, result(t, done))
+			testutil.Equal(t, "IsRunning()", p.IsRunning(), false)
+		})
+	}
+
+	t.Run("should return an error of the function other than that of its context", func(t *testing.T) {
+		l, _ := newLocker(t, true)
+		leading := newLeading()
+		leading.ending = func(context.Context) error { return errBoom }
+		p := newProcess(t, "p", l, leading.run)
+		done := start(context.Background(), p)
+		leading.next(t)
+		testutil.NoError(t, p.Close())
+		if err := result(t, done); !errors.Is(err, errBoom) {
+			t.Fatalf("Run() = %v, want errBoom", err)
+		}
 	})
 }

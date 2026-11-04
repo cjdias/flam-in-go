@@ -28,7 +28,9 @@
 // each with a conditional update failing when another relay claimed it
 // first, publishes them in that order, then marks them sent, or deletes
 // them when [ConfigFieldDelete] is set. It claims the next batch at once
-// when the batch was full, and polls every [ConfigFieldPoll] otherwise.
+// when the batch was full and at least one of its messages was published,
+// and polls every [ConfigFieldPoll] otherwise, so that a database or a
+// broker that keeps failing is not queried again at once.
 // The sent messages are deleted once [ConfigFieldRetention] elapsed, every
 // [ConfigFieldCleanup].
 //

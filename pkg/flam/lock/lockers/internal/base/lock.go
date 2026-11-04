@@ -80,10 +80,10 @@ func (h *heldLock) Release(
 	ctx context.Context,
 ) error {
 	ok, err := h.locker.backend.Release(orBackground(ctx), h.key, h.token)
+	h.end() // even on a failure, the key then expiring by its ttl
 	if err != nil {
 		return h.err(lock.ErrStorage, lockReleaseMessage, err)
 	}
-	h.end()
 	if !ok {
 		return h.err(lock.ErrNotHeld, lockReleaseMessage, nil)
 	}

@@ -165,6 +165,49 @@ func Test_Retry(t *testing.T) {
 		testutil.Equal(t, "timers", clock.Timers(), 0)
 	})
 
+	t.Run("should not call the function when the context is already done", func(t *testing.T) {
+		for name, tc := range map[string]struct {
+			ctx  func() context.Context
+			want error
+			text string
+		}{
+			"canceled": {
+				ctx: func() context.Context {
+					ctx, cancel := context.WithCancel(context.Background())
+					cancel()
+					return ctx
+				},
+				want: context.Canceled,
+				text: "context canceled",
+			},
+			"deadline exceeded": {
+				ctx: func() context.Context {
+					ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
+					t.Cleanup(cancel)
+					return ctx
+				},
+				want: context.DeadlineExceeded,
+				text: "context deadline exceeded",
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
+				clock := testutil.NewClock(time.Unix(0, 0))
+				a := &attempts{errs: []error{errTransient}}
+
+				err := database.Retry(tc.ctx(), a.fn, database.RetryOptions{Clock: clock})
+				testutil.Error(t, err, database.ErrRetry,
+					"unable to retry: unable to complete with retries: "+tc.text, map[string]any{
+						database.ErrorFieldAttempts: 0,
+					})
+				if !errors.Is(err, tc.want) {
+					t.Fatalf("Retry() = %v, want it to wrap %v", err, tc.want)
+				}
+				testutil.Equal(t, "calls", a.calls, 0)
+				testutil.Equal(t, "timers", clock.Timers(), 0)
+			})
+		}
+	})
+
 	t.Run("should classify with the given function", func(t *testing.T) {
 		clock := testutil.NewClock(time.Unix(0, 0))
 		errMine := errors.New("mine")

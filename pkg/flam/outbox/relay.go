@@ -2,8 +2,6 @@ package outbox
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"sync"
 	"time"
@@ -12,6 +10,8 @@ import (
 
 	"github.com/cjdias/flam-in-go/pkg/flam"
 	"github.com/cjdias/flam-in-go/pkg/flam/container"
+	"github.com/cjdias/flam-in-go/pkg/flam/internal/backoff"
+	"github.com/cjdias/flam-in-go/pkg/flam/internal/token"
 )
 
 // relay is the [flam.IWatchdogProcess] publishing the messages of the
@@ -55,9 +55,9 @@ func (r *relay) IsRunning() bool {
 }
 
 // Run publishes the messages of the outbox, a batch after the other,
-// polling again once a batch is not full, until the context is done or
-// the relay is closed, the batch under way being completed. A nil context
-// never ends. It returns nil, the failures being logged, fails with
+// polling again once a batch is not full or published none of its
+// messages, until the context is done or the relay is closed, the batch
+// under way being completed. A nil context never ends. It returns nil, the failures being logged, fails with
 // ErrRunning when the relay runs already, and returns at once once the
 // relay is closed.
 func (r *relay) Run(
@@ -153,9 +153,13 @@ func (r *relay) clean(
 }
 
 // publishBatch claims a batch of messages, then publishes them in order,
-// returning whether the batch was full, so that more messages may be
-// pending. Once a message of a topic fails, or cannot be claimed, the
-// later messages of the topic are left for later, keeping their order.
+// returning whether the batch was full and at least one of its messages
+// was published, so that more messages may be pending: a batch none of
+// whose messages could be claimed or published, such as when the database
+// or the broker keeps failing, makes Run wait for the poll delay rather
+// than select the same messages again at once. Once a message of a topic
+// fails, or cannot be claimed, the later messages of the topic are left
+// for later, keeping their order.
 func (r *relay) publishBatch(
 	ctx context.Context,
 ) bool {
@@ -180,10 +184,10 @@ func (r *relay) publishBatch(
 		if skipped[row.Topic] {
 			continue
 		}
-		token := newToken()
+		claimToken := token.New()
 		res := db.Model(&Row{}).
 			Where("id = ? AND token = ? AND sent_at IS NULL", row.ID, row.Token).
-			Updates(map[string]any{"token": token, "locked_until": until})
+			Updates(map[string]any{"token": claimToken, "locked_until": until})
 		if res.Error != nil {
 			r.log(flam.LogError, newErrMessage(ErrClaim, relayClaimMessage, r.relayId, &row, res.Error))
 		}
@@ -191,11 +195,12 @@ func (r *relay) publishBatch(
 			skipped[row.Topic] = true
 			continue
 		}
-		row.Token, row.LockedUntil = token, &until
+		row.Token, row.LockedUntil = claimToken, &until
 		claimed = append(claimed, row)
 	}
 
 	failed := map[string]bool{}
+	published := 0
 	for _, row := range claimed {
 		if failed[row.Topic] {
 			r.record(ctx, &row, map[string]any{"locked_until": nil})
@@ -206,19 +211,20 @@ func (r *relay) publishBatch(
 			r.log(flam.LogWarning, err)
 			r.record(ctx, &row, map[string]any{
 				"attempts":        row.Attempts + 1,
-				"next_attempt_at": r.now().Add(r.delay(row.Attempts + 1)),
+				"next_attempt_at": r.now().Add(backoff.Delay(r.backoff, r.maxBackoff, row.Attempts+1)),
 				"locked_until":    nil,
 				"last_error":      err.Error(),
 			})
 			continue
 		}
+		published++
 		if r.delete {
 			r.record(ctx, &row, nil)
 		} else {
 			r.record(ctx, &row, map[string]any{"sent_at": r.now(), "locked_until": nil})
 		}
 	}
-	return len(rows) == r.batch
+	return published > 0 && len(rows) == r.batch
 }
 
 // publish publishes the message with the broker, returning the error
@@ -262,22 +268,6 @@ func (r *relay) record(
 	}
 }
 
-// delay returns the backoff delay of the retry following the attempt:
-// the backoff doubled at each attempt after the first, up to the maximum.
-func (r *relay) delay(
-	attempt int,
-) time.Duration {
-	d := r.backoff
-	for i := 1; i < attempt && d < r.maxBackoff; i++ {
-		if d > r.maxBackoff/2 {
-			d = r.maxBackoff
-		} else {
-			d *= 2
-		}
-	}
-	return d
-}
-
 // log logs the error at the level on LogChannel, with its context, when
 // the relay has a logger.
 func (r *relay) log(
@@ -287,13 +277,6 @@ func (r *relay) log(
 	if r.logger != nil {
 		r.logger.Signal(level, LogChannel, err.Error(), container.Bag(err.Context()))
 	}
-}
-
-// newToken returns a new random claim token.
-func newToken() string {
-	b := make([]byte, 16)
-	_, _ = rand.Read(b) // never fails
-	return hex.EncodeToString(b)
 }
 
 // Messages of the errors of the relay.

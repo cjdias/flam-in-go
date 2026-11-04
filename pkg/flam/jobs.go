@@ -86,7 +86,9 @@ type JobOptions struct {
 
 	// Tx is the gorm transaction to insert the job with, so that the job
 	// is enqueued only when the transaction commits, nil inserting it with
-	// the connection of the queue.
+	// the connection of the queue. Enqueue then notifies no worker, as the
+	// job is not visible before the commit: the caller calls the Notify
+	// method of the queue once the transaction commits.
 	Tx *gorm.DB
 }
 
@@ -115,8 +117,17 @@ type IJobQueue interface {
 	// [github.com/cjdias/flam-in-go/pkg/flam/jobs.ErrEncode] when the
 	// payload cannot be encoded, or
 	// [github.com/cjdias/flam-in-go/pkg/flam/jobs.ErrEnqueue] when the
-	// database refuses it.
+	// database refuses it. Once stored, the job is notified to the
+	// workers, as Notify does, unless it is stored with the transaction
+	// of the caller, which must call Notify once it commits.
 	Enqueue(ctx context.Context, kind string, payload any, opts ...JobOption) (string, error)
+
+	// Notify wakes the idle worker of the queue, and publishes the wakeup
+	// notification of the queue when it has a broker, so that the workers
+	// poll at once rather than after their poll delay, such as after the
+	// commit of a transaction jobs were enqueued with. The failure to
+	// publish is logged, as the polls find the jobs anyway.
+	Notify(ctx context.Context)
 
 	// Worker returns the process running the workers of the queue,
 	// provided in the

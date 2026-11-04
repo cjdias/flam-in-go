@@ -40,8 +40,8 @@ func (c *creator) Accept(
 	return bag.String(factory.ConfigFieldDriver) == Driver
 }
 
-// Create returns the middleware of the maximum size of the configuration,
-// or of its default.
+// Create returns the middleware of the maximum size and the strength of
+// the tags of the configuration, or of their defaults.
 func (c *creator) Create(
 	bag flam.IBag,
 ) (flam.IRestMiddleware, error) {
@@ -51,10 +51,15 @@ func (c *creator) Create(
 	if !ok || maxSize < 1 {
 		return nil, newErrCreate(ErrInvalidField, creatorCreateMessage, id, ConfigFieldMaxSize)
 	}
+	strong, ok := settings.Field(c.config, bag, ConfigFieldStrong, DefaultStrongConfigPath, defaultStrong).(bool)
+	if !ok {
+		return nil, newErrCreate(ErrInvalidField, creatorCreateMessage, id, ConfigFieldStrong)
+	}
 
 	return &middleware{
 		id:      id,
 		maxSize: maxSize,
+		strong:  strong,
 	}, nil
 }
 

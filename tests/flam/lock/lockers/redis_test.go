@@ -118,6 +118,7 @@ func Test_Redis(t *testing.T) {
 	t.Run("should fail when the server fails", func(t *testing.T) {
 		h := newHarness(t, redis.Driver, nil)
 		held := tryAcquire(t, h.first, "job")
+		kept := tryAcquire(t, h.first, "kept")
 		h.server.Close()
 
 		_, ok, err := h.first.TryAcquire(context.Background(), "other", ttl)
@@ -127,13 +128,23 @@ func Test_Redis(t *testing.T) {
 		storageErr(t, err, "unable to acquire lock", "other")
 		storageErr(t, held.Refresh(context.Background(), ttl), "unable to refresh lock", "job")
 		storageErr(t, held.Release(context.Background()), "unable to release lock", "job")
-		if isLost(held) {
-			t.Fatal("a failed release ended the lock")
-		}
-		storageErr(t, h.first.Close(), "unable to release lock on close", "job")
 		if !isLost(held) {
+			t.Fatal("a failed release did not end the lock")
+		}
+		storageErr(t, h.first.Close(), "unable to release lock on close", "kept")
+		if !isLost(kept) {
 			t.Fatal("closing the locker did not end the lock")
 		}
+	})
+
+	t.Run("should stop refreshing a lock whose release fails", func(t *testing.T) {
+		h := newHarness(t, redis.Driver, autoRefresh)
+		held := tryAcquire(t, h.first, "job")
+		waitTimers(t, h.clock, 1)
+		h.server.Close()
+		storageErr(t, held.Release(context.Background()), "unable to release lock", "job")
+		waitLost(t, held)
+		waitTimers(t, h.clock, 0)
 	})
 
 	t.Run("should keep trying to refresh until the ttl elapsed", func(t *testing.T) {

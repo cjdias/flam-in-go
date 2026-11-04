@@ -17,6 +17,19 @@
 //
 //	id, err := queue.Enqueue(ctx, "mail.welcome", Welcome{UserId: 7}, jobs.WithDelay(time.Minute))
 //
+// A job enqueued with a transaction is not visible to the workers before
+// the transaction commits, so that Enqueue does not notify them: the
+// caller calls the Notify method of the queue once it commits, the
+// workers finding the job at their next poll otherwise:
+//
+//	err := conn.Transaction(func(tx *gorm.DB) error {
+//		_, err := queue.Enqueue(ctx, "mail.welcome", Welcome{UserId: 7}, jobs.WithTx(tx))
+//		return err
+//	})
+//	if err == nil {
+//		queue.Notify(ctx)
+//	}
+//
 // and provides a [github.com/cjdias/flam-in-go/pkg/flam.IJobHandler] per
 // kind in the [HandlerGroup] container group.
 //
@@ -27,8 +40,8 @@
 // time is reached, in run time order, up to [ConfigFieldConcurrency] at
 // once, and polls again once idle, every [ConfigFieldPoll] or when a job
 // is enqueued by the queue, or by another process when the queue has a
-// [ConfigFieldBroker]: Enqueue then publishes a wakeup notification on its
-// [ConfigFieldTopic], which the worker subscribes to. The notifications
+// [ConfigFieldBroker]: Enqueue, or Notify, then publishes a wakeup
+// notification on its [ConfigFieldTopic], which the worker subscribes to. The notifications
 // only shorten the wait, as the polls find the jobs anyway.
 //
 // A worker claims a job by setting its state to [StateRunning] with a new

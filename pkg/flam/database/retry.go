@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/cjdias/flam-in-go/pkg/flam"
+	"github.com/cjdias/flam-in-go/pkg/flam/internal/backoff"
 )
 
 // RetryOptions are the options of [Retry], each zero value taking its
@@ -59,10 +60,14 @@ type RetryOptions struct {
 // Retry returns nil once fn succeeds, and the error of fn, unchanged, once
 // it fails with an error that is not transient. It fails with ErrRetry,
 // along with the error of the last attempt, once the attempts are
-// exhausted, and along with the error of the context when the context ends
-// while waiting, both with the ErrorFieldAttempts context field. It fails
-// with ErrNilRetryFunc when fn is nil and ErrNilClock when the options have
-// no clock.
+// exhausted, and along with the error of the context, and of the last
+// attempt if any, once the context is done before an attempt, the first
+// one included, or while waiting, so that fn is never called with a done
+// context: errors.Is then tells both ErrRetry and the error of the
+// context, such as [context.Canceled]. Both have the ErrorFieldAttempts
+// context field, the number of attempts made. It fails with
+// ErrNilRetryFunc when fn is nil and ErrNilClock when the options have no
+// clock.
 func Retry(
 	ctx context.Context,
 	fn func(ctx context.Context) error,
@@ -76,27 +81,31 @@ func Retry(
 	}
 	attempts := retryDefault(opts.Attempts, DefaultRetryAttempts)
 	delay := retryDefault(opts.Delay, DefaultRetryDelay)
-	wait := newBackoff(delay, max(delay, retryDefault(opts.MaxDelay, DefaultRetryMaxDelay)))
+	limit := max(delay, retryDefault(opts.MaxDelay, DefaultRetryMaxDelay))
 	transient := opts.IsTransient
 	if transient == nil {
 		transient = IsTransient
 	}
 
-	for attempt := 1; ; attempt++ {
-		err := fn(ctx)
-		if err == nil || !transient(err) {
-			return err
+	var last error
+	for attempt := 0; ; {
+		if err := ctx.Err(); err != nil {
+			return newErrRetry(attempt, err, last)
+		}
+		attempt++
+		last = fn(ctx)
+		if last == nil || !transient(last) {
+			return last
 		}
 		if attempt == attempts {
-			return newErrRetry(attempt, err)
+			return newErrRetry(attempt, last)
 		}
-		timer := opts.Clock.NewTimer(wait.next())
+		timer := opts.Clock.NewTimer(backoff.Delay(delay, limit, attempt))
 		select {
 		case <-ctx.Done():
-			timer.Stop()
-			return newErrRetry(attempt, ctx.Err(), err)
 		case <-timer.C():
 		}
+		timer.Stop()
 	}
 }
 
@@ -140,33 +149,6 @@ func IsTransient(
 	return slices.ContainsFunc(retrySQLiteMessages, func(m string) bool {
 		return strings.Contains(message, m)
 	})
-}
-
-// backoff gives the waits between attempts, from a delay doubling on each
-// call up to a limit.
-type backoff struct {
-	delay time.Duration
-	limit time.Duration
-}
-
-// newBackoff returns the backoff starting at the delay, doubling up to the
-// limit, which must not be shorter.
-func newBackoff(
-	delay time.Duration,
-	limit time.Duration,
-) *backoff {
-	return &backoff{delay: delay, limit: limit}
-}
-
-// next returns the wait before the next attempt, and doubles the
-// following one, up to the limit, without overflowing.
-func (b *backoff) next() time.Duration {
-	d := b.delay
-	b.delay = b.limit
-	if d < b.limit/2 {
-		b.delay = 2 * d
-	}
-	return d
 }
 
 // retryDefault returns the value, or the default when the value is 0 or

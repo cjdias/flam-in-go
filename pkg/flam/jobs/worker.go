@@ -2,8 +2,6 @@ package jobs
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -12,6 +10,8 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/cjdias/flam-in-go/pkg/flam"
+	"github.com/cjdias/flam-in-go/pkg/flam/internal/backoff"
+	"github.com/cjdias/flam-in-go/pkg/flam/internal/token"
 )
 
 // worker is the [flam.IWatchdogProcess] running the jobs of a queue.
@@ -244,10 +244,10 @@ func (w *worker) claim(
 
 			row := rows[0]
 			until := now.Add(w.lease)
-			token := newToken()
+			claimToken := token.New()
 			res := tx.Model(&Row{}).
 				Where("id = ? AND token = ?", row.ID, row.Token).
-				Updates(map[string]any{"state": StateRunning, "token": token, "locked_until": until, "attempt": row.Attempt + 1})
+				Updates(map[string]any{"state": StateRunning, "token": claimToken, "locked_until": until, "attempt": row.Attempt + 1})
 			switch {
 			case res.Error != nil:
 				return res.Error
@@ -255,7 +255,7 @@ func (w *worker) claim(
 				lost = true
 				return nil
 			}
-			row.State, row.Token, row.LockedUntil, row.Attempt = StateRunning, token, &until, row.Attempt+1
+			row.State, row.Token, row.LockedUntil, row.Attempt = StateRunning, claimToken, &until, row.Attempt+1
 			claimed = &job{row: row}
 			return nil
 		}
@@ -298,7 +298,7 @@ func (w *worker) execute(
 		w.queue.log(flam.LogWarning, err)
 		w.record(ctx, j, map[string]any{
 			"state":        StatePending,
-			"run_at":       now.Add(w.delay(j.row.Attempt)),
+			"run_at":       now.Add(backoff.Delay(w.backoff, w.maxBackoff, j.row.Attempt)),
 			"locked_until": nil,
 			"last_error":   err.Error(),
 		})
@@ -390,29 +390,6 @@ func (w *worker) record(
 	case res.RowsAffected == 0:
 		w.queue.log(flam.LogWarning, newErrJob(ErrLeaseLost, workerRecordMessage, j, nil))
 	}
-}
-
-// delay returns the backoff delay of the retry following the attempt:
-// the backoff doubled at each attempt after the first, up to the maximum.
-func (w *worker) delay(
-	attempt int,
-) time.Duration {
-	d := w.backoff
-	for i := 1; i < attempt && d < w.maxBackoff; i++ {
-		if d > w.maxBackoff/2 {
-			d = w.maxBackoff
-		} else {
-			d *= 2
-		}
-	}
-	return min(d, w.maxBackoff)
-}
-
-// newToken returns a new random claim token.
-func newToken() string {
-	b := make([]byte, 16)
-	_, _ = rand.Read(b) // never fails
-	return hex.EncodeToString(b)
 }
 
 // Messages of the errors of the worker.

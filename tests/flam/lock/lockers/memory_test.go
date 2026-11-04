@@ -84,10 +84,28 @@ func Test_Memory(t *testing.T) {
 		testutil.Error(t, err, lock.ErrStorage, "unable to refresh lock: lock storage failure: context canceled", keyErr("first", "job"))
 		err = held.Release(ctx)
 		testutil.Error(t, err, lock.ErrStorage, "unable to release lock: lock storage failure: context canceled", keyErr("first", "job"))
-		if isLost(held) {
-			t.Fatal("a failed release ended the lock")
+		if !isLost(held) {
+			t.Fatal("a failed release did not end the lock")
 		}
-		testutil.NoError(t, held.Release(context.Background()))
+		notAcquired(t, h.first, "job")                          // the key is left to expire
+		testutil.NoError(t, held.Release(context.Background())) // unless released again
+		tryAcquire(t, h.first, "job")
+	})
+
+	t.Run("should end a lock whose release fails, its key expiring by its ttl", func(t *testing.T) {
+		h := newHarness(t, memory.Driver, autoRefresh)
+		held := tryAcquire(t, h.first, "job")
+		waitTimers(t, h.clock, 1)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := held.Release(ctx)
+		testutil.Error(t, err, lock.ErrStorage, "unable to release lock: lock storage failure: context canceled", keyErr("first", "job"))
+		waitLost(t, held)
+		waitTimers(t, h.clock, 0) // the automatic refreshes stopped
+		notAcquired(t, h.first, "job")
+		h.clock.Advance(ttl)
+		testutil.Equal(t, "Fence()", tryAcquire(t, h.first, "job").Fence(), int64(2))
 	})
 
 	t.Run("should lose a lock its automatic refresh finds expired", func(t *testing.T) {

@@ -2,6 +2,7 @@ package leader
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -19,11 +20,16 @@ import (
 // process releases the lock, ignoring the error of the release, as the
 // lock expires anyway, then campaigns again, unless the function returned
 // an error, which Run then returns, or the context of Run is done or the
-// process is closed, Run then returning nil. Run returns the errors of the
-// locker other than those of its context being done. A function returning
-// nil before its context is done gives the leadership up, the process
-// campaigning again at once, so that it usually blocks until its context
-// is done.
+// process is closed, Run then returning nil. The error of the context of
+// the function once it is done, as returned by a function ending with
+// <-ctx.Done() and return ctx.Err(), matching it or its cause with
+// [errors.Is], is not an error of the function but the normal end of its
+// leadership: the process campaigns again once the lock is lost, and Run
+// returns nil once its context is done or the process is closed. Run
+// returns the errors of the locker other than those of its context being
+// done. A function returning nil before its context is done gives the
+// leadership up, the process campaigning again at once, so that it usually
+// blocks until its context is done.
 //
 // Run fails with ErrRunning when the process runs already, and returns at
 // once once the process is closed. A panic of the function releases the
@@ -170,7 +176,8 @@ const (
 type fenceKey struct{}
 
 // lead runs the function while the lock is held, then releases it,
-// returning the error of the function.
+// returning the error of the function, or nil when it is the error of its
+// context once done, the end of the leadership.
 func (p *process) lead(
 	ctx context.Context,
 	lock flam.ILock,
@@ -193,7 +200,12 @@ func (p *process) lead(
 		<-watched
 		_ = lock.Release(context.WithoutCancel(ctx))
 	}()
-	return p.run(runCtx)
+	err := p.run(runCtx)
+	if err != nil && runCtx.Err() != nil &&
+		(errors.Is(err, runCtx.Err()) || errors.Is(err, context.Cause(runCtx))) {
+		return nil
+	}
+	return err
 }
 
 // setRunning sets whether Run is under way.

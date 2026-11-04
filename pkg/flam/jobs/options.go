@@ -52,7 +52,10 @@ func WithKey(
 // WithTx returns the [flam.JobOption] inserting the job with the gorm
 // transaction, such as the one given to the callback of a Transaction
 // method, so that the job is enqueued only when it commits. The
-// transaction must be one of the database of the queue.
+// transaction must be one of the database of the queue. As the job is not
+// visible before the commit, Enqueue then notifies no worker: the caller
+// calls the Notify method of the queue once the transaction commits,
+// otherwise the workers find the job at their next poll.
 func WithTx(
 	tx *gorm.DB,
 ) flam.JobOption {

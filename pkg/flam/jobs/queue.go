@@ -84,9 +84,23 @@ func (q *queue) Enqueue(
 		return "", newErrQueue(ErrEnqueue, queueEnqueueMessage, q.id, err).
 			With(ErrorFieldKind, kind)
 	}
-	q.worker.wake()
-	q.notify(ctx)
+	if options.Tx == nil {
+		q.Notify(ctx)
+	}
 	return id, nil
+}
+
+func (q *queue) Notify(
+	ctx context.Context,
+) {
+	q.worker.wake()
+	if q.broker == nil {
+		return
+	}
+	if err := q.broker.Publish(ctx, q.topic, []byte(q.id), nil); err != nil {
+		q.log(flam.LogWarning, newErrQueue(ErrWakeup, queueNotifyMessage, q.id, err).
+			With(ErrorFieldBroker, q.broker.Id()))
+	}
 }
 
 func (q *queue) Worker() flam.IWatchdogProcess {
@@ -144,20 +158,6 @@ func (q *queue) insert(
 		row.ID = existing.ID
 	}
 	return strconv.FormatUint(row.ID, 10), nil
-}
-
-// notify publishes the wakeup notification of the queue, when it has a
-// broker, logging the failure.
-func (q *queue) notify(
-	ctx context.Context,
-) {
-	if q.broker == nil {
-		return
-	}
-	if err := q.broker.Publish(ctx, q.topic, []byte(q.id), nil); err != nil {
-		q.log(flam.LogWarning, newErrQueue(ErrWakeup, queueNotifyMessage, q.id, err).
-			With(ErrorFieldBroker, q.broker.Id()))
-	}
 }
 
 // log logs the error at the level on LogChannel, with its context, when

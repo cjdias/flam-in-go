@@ -27,6 +27,12 @@ import (
 // token names a key it does not hold, at most once per minimum refresh
 // time, whether the fetch succeeds or not. A failed fetch keeps the keys
 // of the last successful one.
+//
+// A single fetch runs at a time, on a goroutine of its own, never under
+// the lock of the keyring: the tokens naming a key it holds are verified
+// with it meanwhile, even once its refresh time elapsed, while those
+// naming a key it does not hold wait for the fetch under way, bounded by
+// the timeout.
 type jwks struct {
 	clock      flam.IClock
 	client     jwksClient
@@ -35,11 +41,15 @@ type jwks struct {
 	minRefresh time.Duration
 	timeout    time.Duration
 
-	mu        sync.Mutex
-	url       string
+	// url is the URL of the key set, once discovered, only read and
+	// written by the fetch under way
+	url string
+
+	mu        sync.RWMutex // guards the fields below, never held during a fetch
 	keys      map[string]jwksKey
 	fetched   time.Time
 	attempted time.Time
+	fetching  chan struct{} // closed once the fetch under way ends, nil without one
 }
 
 // jwksClient sends the requests fetching the discovery document and the
@@ -56,10 +66,12 @@ type jwksKey struct {
 }
 
 // key returns the key of the set named by the "kid" header of the token,
-// fetching the set first when it was never fetched, its refresh time
-// elapsed, or it does not hold the key, unless a fetch was attempted
-// within the minimum refresh time. The key must fit the algorithm of the
-// token, and be restricted to it when its "alg" member is set.
+// starting a fetch of the set when it was never fetched, its refresh time
+// elapsed, or it does not hold the key, unless a fetch is under way or was
+// attempted within the minimum refresh time. A key the set holds is
+// returned at once, while the fetch of a key it does not hold is waited
+// for. The key must fit the algorithm of the token, and be restricted to
+// it when its "alg" member is set.
 func (s *jwks) key(
 	ctx context.Context,
 	token *gojwt.Token,
@@ -69,17 +81,12 @@ func (s *jwks) key(
 		return nil, errNoKid
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := s.clock.Now()
-	key, found := s.keys[kid]
-	stale := s.keys == nil || now.Sub(s.fetched) >= s.refresh
-	if (stale || !found) && now.Sub(s.attempted) >= s.minRefresh {
-		s.attempted = now
-		if keys, err := s.fetch(ctx); err == nil {
-			s.keys, s.fetched = keys, now
-			key, found = keys[kid]
-		}
+	key, found, fetching := s.lookup(ctx, kid)
+	if !found && fetching != nil {
+		<-fetching // bounded by the timeout
+		s.mu.RLock()
+		key, found = s.keys[kid]
+		s.mu.RUnlock()
 	}
 
 	algorithm := token.Method.Alg()
@@ -93,6 +100,53 @@ func (s *jwks) key(
 		return nil, err
 	}
 	return key.value, nil
+}
+
+// lookup returns the key of the set named by the kid, and whether the set
+// holds it, along with the channel closed once the fetch under way ends,
+// nil without one, starting it when the set was never fetched, its refresh
+// time elapsed, or it does not hold the key, unless a fetch is under way
+// or was attempted within the minimum refresh time.
+func (s *jwks) lookup(
+	ctx context.Context,
+	kid string,
+) (jwksKey, bool, <-chan struct{}) {
+	s.mu.RLock()
+	now := s.clock.Now()
+	key, found := s.keys[kid]
+	fresh := s.keys != nil && now.Sub(s.fetched) < s.refresh
+	s.mu.RUnlock()
+	if found && fresh {
+		return key, true, nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key, found = s.keys[kid] // a fetch may have ended meanwhile
+	stale := s.keys == nil || now.Sub(s.fetched) >= s.refresh
+	if s.fetching == nil && (stale || !found) && now.Sub(s.attempted) >= s.minRefresh {
+		s.attempted = now
+		s.fetching = make(chan struct{})
+		go s.update(ctx, now, s.fetching)
+	}
+	return key, found, s.fetching
+}
+
+// update fetches the set, keeping its keys, fetched at the time, when the
+// fetch succeeds, then ends the fetch under way, closing its channel.
+func (s *jwks) update(
+	ctx context.Context,
+	now time.Time,
+	fetching chan struct{},
+) {
+	keys, err := s.fetch(ctx)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err == nil {
+		s.keys, s.fetched = keys, now
+	}
+	s.fetching = nil
+	close(fetching)
 }
 
 // fetch returns the usable keys of the set, discovering its URL first

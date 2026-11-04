@@ -417,6 +417,31 @@ func Test_Run(t *testing.T) {
 			map[string]any{"id": "scheduler"})
 	})
 
+	t.Run("should take a nil context as never done", func(t *testing.T) {
+		j := newJob("a", nil)
+		a, clock := newApp(t, options{values: hourly("a"), jobs: []flam.IScheduledJob{j}})
+		ps, err := processes(a) // not closed on cleanup, as Close hangs after a failed Run
+		testutil.NoError(t, err)
+		p := ps[0]
+		result := make(chan error, 1)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					result <- fmt.Errorf("Run() panicked: %v", r)
+				}
+			}()
+			var ctx context.Context
+			result <- p.Run(ctx)
+		}()
+		staysQuiet(t, "result", result)
+		timers(t, clock, 1)
+		clock.Advance(time.Hour)
+		receive(t, "run", j.runs)
+		testutil.NoError(t, p.Close())
+		testutil.NoError(t, receive(t, "result", result))
+		testutil.Equal(t, "IsRunning()", p.IsRunning(), false)
+	})
+
 	t.Run("should refuse a run while one is under way", func(t *testing.T) {
 		p, clock := newProcess(t, options{values: hourly("a"), jobs: []flam.IScheduledJob{newJob("a", nil)}})
 		run(t, p)

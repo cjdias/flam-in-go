@@ -21,7 +21,9 @@
 // another process waits for the lock of a leader that crashed. When the
 // lock is lost, as when the backend could not be reached for its whole
 // ttl, the context of the function is cancelled: the function must then
-// stop acting as the leader, as another process may already lead.
+// stop acting as the leader, as another process may already lead, and
+// return, nil or the error of its context alike, the process then
+// campaigning again.
 //
 // As a leader stalled past its ttl may still act while another leads, the
 // writes of the function should carry the fencing token of its lock, read

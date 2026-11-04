@@ -12,6 +12,7 @@ import (
 
 	"github.com/cjdias/flam-in-go/pkg/flam"
 	"github.com/cjdias/flam-in-go/pkg/flam/factory"
+	"github.com/cjdias/flam-in-go/pkg/flam/internal/backoff"
 	"github.com/cjdias/flam-in-go/pkg/flam/internal/settings"
 )
 
@@ -70,13 +71,13 @@ func (c *connectionCreator) Create(
 		return nil, err
 	}
 
-	wait := newBackoff(s.delay, max(s.delay, ConnectRetryMaxDelay))
+	limit := max(s.delay, ConnectRetryMaxDelay)
 	for attempt := 0; ; attempt++ {
 		conn, err := c.open(s)
 		if err == nil || attempt == s.retries {
 			return conn, err
 		}
-		c.clock.Sleep(wait.next())
+		c.clock.Sleep(backoff.Delay(s.delay, limit, attempt+1))
 	}
 }
 

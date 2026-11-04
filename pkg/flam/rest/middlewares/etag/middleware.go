@@ -10,10 +10,12 @@ import (
 
 // middleware is the etag [flam.IRestMiddleware], tagging the 200
 // responses to the GET and HEAD requests whose body fits in its maximum
-// size, and answering the conditional ones whose tag matches with a 304.
+// size, with a weak tag unless strong, and answering the conditional ones
+// whose tag matches with a 304.
 type middleware struct {
 	id      string
 	maxSize int
+	strong  bool
 }
 
 // compile time check that *middleware implements IRestMiddleware
@@ -42,6 +44,7 @@ func (m *middleware) Wrap(
 		ew := &writer{
 			ResponseWriter: w,
 			maxSize:        m.maxSize,
+			strong:         m.strong,
 			head:           req.Method == http.MethodHead,
 			ifNoneMatch:    strings.Join(req.Header.Values("If-None-Match"), ","),
 		}

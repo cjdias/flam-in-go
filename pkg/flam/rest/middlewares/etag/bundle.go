@@ -37,6 +37,7 @@ func (b *bundleImpl) Config(
 	for path, value := range map[string]any{
 		rest.MiddlewareConfigPath + "." + Id: container.Bag{factory.ConfigFieldDriver: Driver},
 		DefaultMaxSizeConfigPath:             defaultMaxSize,
+		DefaultStrongConfigPath:              defaultStrong,
 	} {
 		if err := bag.Set(path, value); err != nil {
 			return err

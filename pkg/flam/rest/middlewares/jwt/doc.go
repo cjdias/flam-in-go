@@ -33,6 +33,11 @@
 // a token names a key it does not hold, such as after a key rotation, at
 // most once per [ConfigFieldJWKSMinRefresh] however many tokens name
 // unknown keys. A failed fetch keeps the keys of the last successful one.
+// A single fetch runs at a time, in the background: the tokens naming a
+// key the set holds are verified with it at once, even while a refresh is
+// under way, so that a slow or unreachable key set server never delays
+// them, while the tokens naming a key it does not hold wait for the fetch
+// under way, bounded by [ConfigFieldJWKSTimeout].
 //
 // The token must also be valid in time, with the leeway of
 // [ConfigFieldLeeway], measured with the

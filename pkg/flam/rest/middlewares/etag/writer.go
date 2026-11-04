@@ -18,6 +18,7 @@ type writer struct {
 	http.ResponseWriter
 
 	maxSize     int
+	strong      bool
 	head        bool
 	ifNoneMatch string
 	status      int
@@ -115,9 +116,9 @@ func (w *writer) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }
 
-// close tags the response buffered once the handler returned, unless the
-// handler set its tag after its status, then sends it, or answers with a
-// 304 when the tag matches. The response to a HEAD request whose handler
+// close tags the response buffered once the handler returned, with a weak
+// tag unless strong, unless the handler set its tag after its status, then
+// sends it, or answers with a 304 when the tag matches. The response to a HEAD request whose handler
 // wrote no body is sent untagged, as its tag would not be the one of the
 // response to the GET request.
 func (w *writer) close() {
@@ -132,6 +133,9 @@ func (w *writer) close() {
 	if etag == "" {
 		sum := sha256.Sum256(w.buf)
 		etag = `"` + hex.EncodeToString(sum[:TagLength]) + `"`
+		if !w.strong {
+			etag = "W/" + etag
+		}
 		w.Header().Set("ETag", etag)
 	}
 	w.send(etag)

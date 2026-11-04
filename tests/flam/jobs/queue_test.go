@@ -3,6 +3,8 @@ package jobs
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,6 +15,47 @@ import (
 	"github.com/cjdias/flam-in-go/pkg/flam/jobs"
 	"github.com/cjdias/flam-in-go/tests/flam/testutil"
 )
+
+// notification is a wakeup notification published with a fake broker.
+type notification struct {
+	topic   string
+	payload string
+}
+
+// fakeBroker is a flam.IBroker recording the published notifications.
+type fakeBroker struct {
+	flam.IBroker
+
+	mu        sync.Mutex
+	published []notification
+}
+
+func (b *fakeBroker) Id() string { return "fake" }
+
+func (b *fakeBroker) Close() error { return nil }
+
+func (b *fakeBroker) Publish(_ context.Context, topic string, payload []byte, _ map[string]string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.published = append(b.published, notification{topic: topic, payload: string(payload)})
+	return nil
+}
+
+// notifications returns the notifications published so far.
+func (b *fakeBroker) notifications() []notification {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]notification{}, b.published...)
+}
+
+// fake stores a fake broker as the broker "fake" of the env, and returns
+// it.
+func (e *env) fake(t *testing.T) *fakeBroker {
+	t.Helper()
+	b := &fakeBroker{}
+	testutil.NoError(t, e.brokers(t).Store("fake", b))
+	return b
+}
 
 func Test_Queue_Enqueue(t *testing.T) {
 	ctx := context.Background()
@@ -86,6 +129,66 @@ func Test_Queue_Enqueue(t *testing.T) {
 			return nil
 		}))
 		testutil.Equal(t, "rows", e.rows(t), int64(1))
+	})
+
+	t.Run("should not notify the job enqueued with a transaction", func(t *testing.T) {
+		e := newEnv(t, options{queue: container.Bag{jobs.ConfigFieldBroker: "fake"}})
+		b := e.fake(t)
+		q := e.queue(t)
+
+		boom := errors.New("boom")
+		err := e.conn.Transaction(func(tx *gorm.DB) error {
+			enqueue(t, q, "mail", nil, jobs.WithTx(tx))
+			return boom
+		})
+		testutil.Equal(t, "rolled back", err, boom)
+		testutil.Equal(t, "rolled back notifications", b.notifications(), []notification{})
+
+		testutil.NoError(t, e.conn.Transaction(func(tx *gorm.DB) error {
+			enqueue(t, q, "mail", nil, jobs.WithTx(tx))
+			testutil.Equal(t, "notifications before the commit", b.notifications(), []notification{})
+			return nil
+		}))
+		testutil.Equal(t, "notifications after the commit", b.notifications(), []notification{})
+
+		q.Notify(ctx)
+		testutil.Equal(t, "notified", b.notifications(), []notification{{topic: "flam.jobs.main", payload: "main"}})
+
+		enqueue(t, q, "mail", nil)
+		testutil.Equal(t, "enqueued", b.notifications(), []notification{
+			{topic: "flam.jobs.main", payload: "main"}, {topic: "flam.jobs.main", payload: "main"},
+		})
+		testutil.Equal(t, "rows", e.rows(t), int64(2))
+	})
+
+	t.Run("should wake the worker for the job enqueued with a transaction only once notified", func(t *testing.T) {
+		h := &handler{kind: "mail", fn: func(context.Context, flam.IJob) error { return nil }}
+		e := newEnv(t, options{queue: container.Bag{jobs.ConfigFieldPoll: "1h"}, handlers: []flam.IJobHandler{h}})
+		q := e.queue(t)
+		var polls atomic.Int64
+		inject(t, e.conn, "query", "polls", func(db *gorm.DB) {
+			if _, ok := db.Statement.Dest.(*[]jobs.Row); ok {
+				polls.Add(1)
+			}
+		})
+		done := run(t, q.Worker())
+		eventually(t, "idle", func() bool { return e.clock.Timers() == 1 })
+		testutil.Equal(t, "polls", polls.Load(), int64(1))
+
+		boom := errors.New("boom")
+		_ = e.conn.Transaction(func(tx *gorm.DB) error {
+			enqueue(t, q, "mail", nil, jobs.WithTx(tx))
+			return boom
+		})
+		var id string
+		testutil.NoError(t, e.conn.Transaction(func(tx *gorm.DB) error {
+			id = enqueue(t, q, "mail", nil, jobs.WithTx(tx))
+			return nil
+		}))
+		q.Notify(ctx)
+		eventually(t, "done", func() bool { return e.state(t, id, jobs.StateDone)() && e.clock.Timers() == 1 })
+		stop(t, q.Worker(), done)
+		testutil.Equal(t, "polls", polls.Load(), int64(3))
 	})
 
 	t.Run("should skip the nil options", func(t *testing.T) {

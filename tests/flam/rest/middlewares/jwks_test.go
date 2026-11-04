@@ -106,6 +106,7 @@ type jwksIdP struct {
 	status    int
 	discovery map[string]any
 	hits      map[string]int
+	gate      chan struct{} // the key set answers wait for, unless nil
 }
 
 // newJwksIdP returns a started identity provider of the keys, closed with
@@ -121,8 +122,13 @@ func newJwksIdP(t *testing.T, keys ...map[string]any) *jwksIdP {
 // serve answers the discovery document and key set requests.
 func (p *jwksIdP) serve(w http.ResponseWriter, req *http.Request) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	p.hits[req.URL.Path]++
+	if gate := p.gate; gate != nil && req.URL.Path == "/jwks" {
+		p.mu.Unlock()
+		<-gate
+		p.mu.Lock()
+	}
+	defer p.mu.Unlock()
 	var body any
 	switch req.URL.Path {
 	case "/realm" + "/.well-known/openid-configuration":
@@ -142,6 +148,25 @@ func (p *jwksIdP) serve(w http.ResponseWriter, req *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// hang makes the key set answers wait, once their request counted,
+// until the returned function, which may be called more than once, is
+// called.
+func (p *jwksIdP) hang() func() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	gate := make(chan struct{})
+	p.gate = gate
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			p.mu.Lock()
+			p.gate = nil
+			p.mu.Unlock()
+			close(gate)
+		})
+	}
 }
 
 // set replaces the keys and the status of the key set answers.
@@ -240,6 +265,38 @@ func jwksMiddleware(t *testing.T, idp *jwksIdP, clock flam.IClock, fields contai
 // jwksBearer returns a request of the endpoint 7 with the bearer token.
 func jwksBearer(token string) *http.Request {
 	return authRequest("/items/1", "Authorization", "Bearer "+token)
+}
+
+// jwksUntil serves the request of the token through the middleware until
+// it is served, or rejected when not served, returning the last result,
+// failing the test after 5s, as a stale key set is fetched again in the
+// background.
+func jwksUntil(t *testing.T, m flam.IRestMiddleware, token string, served bool) authResult {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		result := authServe(t, jwksBearer(token), m)
+		if result.served == served {
+			return result
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("served = %v after 5s, want %v", result.served, served)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// jwksWaitCount waits until the identity provider was requested n times
+// for the path, failing the test after 5s.
+func jwksWaitCount(t *testing.T, idp *jwksIdP, path string, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for idp.count(path) != n {
+		if time.Now().After(deadline) {
+			t.Fatalf("%s requested %d times, want %d", path, idp.count(path), n)
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // jwksRejected asserts that the result is the 401 of an invalid token.
@@ -481,7 +538,7 @@ func Test_Jwks(t *testing.T) {
 
 		idp.set(http.StatusOK, jwksJWK(t, "new", &extra.rsa.PublicKey, nil))
 		clock.Advance(time.Nanosecond)
-		jwksRejected(t, authServe(t, jwksBearer(old), m))
+		jwksRejected(t, jwksUntil(t, m, old, false)) // served until refreshed
 		testutil.Equal(t, "refreshed", idp.count("/jwks"), 2)
 		rotated := jwksSign(t, gojwt.SigningMethodRS256, extra.rsa, "new", jwtClaims("alice", nil))
 		testutil.Equal(t, "new served", authServe(t, jwksBearer(rotated), m).served, true)
@@ -498,13 +555,15 @@ func Test_Jwks(t *testing.T) {
 		idp.set(http.StatusInternalServerError)
 		clock.Advance(time.Hour)
 		testutil.Equal(t, "stale served", authServe(t, jwksBearer(old), m).served, true)
-		testutil.Equal(t, "failed fetch", idp.count("/jwks"), 2)
-		testutil.Equal(t, "stale served again", authServe(t, jwksBearer(old), m).served, true)
+		jwksWaitCount(t, idp, "/jwks", 2) // the failed fetch
+		for range 5 {
+			testutil.Equal(t, "stale served again", authServe(t, jwksBearer(old), m).served, true)
+		}
 		testutil.Equal(t, "rate limited", idp.count("/jwks"), 2)
 
 		idp.set(http.StatusOK, jwksJWK(t, "new", &extra.rsa.PublicKey, nil))
 		clock.Advance(time.Minute)
-		jwksRejected(t, authServe(t, jwksBearer(old), m))
+		jwksRejected(t, jwksUntil(t, m, old, false))
 		testutil.Equal(t, "recovered", idp.count("/jwks"), 3)
 	})
 
@@ -609,6 +668,74 @@ func Test_Jwks(t *testing.T) {
 		testutil.Equal(t, "fetches", idp.count("/jwks"), 1)
 	})
 
+	t.Run("should serve the cached keys while a refresh hangs", func(t *testing.T) {
+		clock := testutil.NewClock(epoch)
+		idp := newJwksIdP(t, jwksJWK(t, "rsa", &keys.rsa.PublicKey, nil))
+		m := jwksMiddleware(t, idp, clock, container.Bag{jwt.ConfigFieldLeeway: "24h", jwt.ConfigFieldJWKSTimeout: "1h"})
+		token := jwksSign(t, gojwt.SigningMethodRS256, keys.rsa, "rsa", jwtClaims("alice", nil))
+		testutil.Equal(t, "served", authServe(t, jwksBearer(token), m).served, true)
+
+		release := idp.hang()
+		defer release()
+		clock.Advance(time.Hour)
+		done := make(chan bool, 8)
+		for range 8 {
+			go func() { done <- authServe(t, jwksBearer(token), m).served }()
+		}
+		for range 8 {
+			select {
+			case served := <-done:
+				testutil.Equal(t, "served while refreshing", served, true)
+			case <-time.After(5 * time.Second):
+				t.Fatal("a cached key waited for the refresh")
+			}
+		}
+		jwksWaitCount(t, idp, "/jwks", 2)
+		release()
+	})
+
+	t.Run("should share the fetch under way among the unknown key ids", func(t *testing.T) {
+		clock := testutil.NewClock(epoch)
+		idp := newJwksIdP(t, jwksJWK(t, "rsa", &keys.rsa.PublicKey, nil))
+		m := jwksMiddleware(t, idp, clock, container.Bag{jwt.ConfigFieldLeeway: "24h", jwt.ConfigFieldJWKSTimeout: "1h"})
+		token := jwksSign(t, gojwt.SigningMethodRS256, keys.rsa, "rsa", jwtClaims("alice", nil))
+		testutil.Equal(t, "served", authServe(t, jwksBearer(token), m).served, true)
+
+		release := idp.hang()
+		defer release()
+		idp.set(http.StatusOK, jwksJWK(t, "rsa", &keys.rsa.PublicKey, nil), jwksJWK(t, "new", &extra.rsa.PublicKey, nil))
+		clock.Advance(time.Minute)
+		rotated := jwksSign(t, gojwt.SigningMethodRS256, extra.rsa, "new", jwtClaims("alice", nil))
+		done := make(chan bool, 8)
+		for range 8 {
+			go func() { done <- authServe(t, jwksBearer(rotated), m).served }()
+		}
+		jwksWaitCount(t, idp, "/jwks", 2)
+		select {
+		case <-done:
+			t.Fatal("an unknown key id did not wait for the fetch under way")
+		case <-time.After(50 * time.Millisecond):
+		}
+		cached := make(chan bool, 1)
+		go func() { cached <- authServe(t, jwksBearer(token), m).served }()
+		select {
+		case served := <-cached:
+			testutil.Equal(t, "cached served", served, true)
+		case <-time.After(5 * time.Second):
+			t.Fatal("a cached key waited for the fetch")
+		}
+		release()
+		for range 8 {
+			select {
+			case served := <-done:
+				testutil.Equal(t, "rotated served", served, true)
+			case <-time.After(5 * time.Second):
+				t.Fatal("an unknown key id still waits once fetched")
+			}
+		}
+		testutil.Equal(t, "fetches", idp.count("/jwks"), 2)
+	})
+
 	t.Run("should be read concurrently", func(t *testing.T) {
 		clock := testutil.NewClock(epoch)
 		idp := newJwksIdP(t, jwksJWK(t, "rsa", &keys.rsa.PublicKey, nil))
@@ -643,8 +770,8 @@ func Test_Jwks_Discovery(t *testing.T) {
 		testutil.Equal(t, "served", authServe(t, jwksBearer(token), m).served, true)
 		clock.Advance(time.Hour)
 		testutil.Equal(t, "served after refresh", authServe(t, jwksBearer(token), m).served, true)
+		jwksWaitCount(t, idp, "/jwks", 2)
 		testutil.Equal(t, "discoveries", idp.count("/realm/.well-known/openid-configuration"), 1)
-		testutil.Equal(t, "fetches", idp.count("/jwks"), 2)
 
 		for name, iss := range map[string]any{
 			"other issuer": "issuer",

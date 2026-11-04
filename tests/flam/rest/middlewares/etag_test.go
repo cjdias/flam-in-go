@@ -32,8 +32,15 @@ func newEtag(t *testing.T, fields container.Bag) flam.IRestMiddleware {
 	return m
 }
 
-// tagOf returns the entity tag the middleware computes for the body.
+// tagOf returns the weak entity tag the middleware computes by default
+// for the body.
 func tagOf(body string) string {
+	return "W/" + strongTagOf(body)
+}
+
+// strongTagOf returns the strong entity tag the middleware computes for
+// the body when strong.
+func strongTagOf(body string) string {
 	sum := sha256.Sum256([]byte(body))
 	return `"` + hex.EncodeToString(sum[:16]) + `"`
 }
@@ -75,12 +82,16 @@ func Test_Etag_Bundle(t *testing.T) {
 		for path, want := range map[string]any{
 			rest.MiddlewareConfigPath + "." + etag.Id: container.Bag{factory.ConfigFieldDriver: etag.Driver},
 			etag.DefaultMaxSizeConfigPath:             1048576,
+			etag.DefaultStrongConfigPath:              false,
 		} {
 			testutil.Equal(t, path, bag.Get(path), want)
 		}
 		for got, want := range map[string]string{
 			etag.Driver:                   "flam.rest.middlewares.driver.etag",
 			etag.DefaultMaxSizeConfigPath: "flam.rest.defaults.middlewares.etag.max_size",
+			etag.DefaultStrongConfigPath:  "flam.rest.defaults.middlewares.etag.strong",
+			etag.ConfigFieldMaxSize:       "max_size",
+			etag.ConfigFieldStrong:        "strong",
 		} {
 			testutil.Equal(t, "const", got, want)
 		}
@@ -111,31 +122,31 @@ func Test_Etag(t *testing.T) {
 			"Etag":         {tagOf("hello world")},
 		})
 		testutil.Equal(t, "body", rec.Body.String(), "hello world")
-		testutil.Equal(t, "tag", len(tagOf("")), 34)
+		testutil.Equal(t, "tag", len(tagOf("")), 36)
 	})
 
 	t.Run("should answer the matching conditional requests with a 304", func(t *testing.T) {
-		tag := tagOf("hello")
+		tag, strong := tagOf("hello"), strongTagOf("hello")
 		for name, tc := range map[string]struct {
 			method      string
 			ifNoneMatch []string
 			status      int
 		}{
-			"strong":           {http.MethodGet, []string{tag}, http.StatusNotModified},
-			"weak":             {http.MethodGet, []string{"W/" + tag}, http.StatusNotModified},
-			"listed":           {http.MethodGet, []string{`"a", W/"b",` + tag}, http.StatusNotModified},
-			"second header":    {http.MethodGet, []string{`"a"`, " " + tag}, http.StatusNotModified},
+			"strong":           {http.MethodGet, []string{strong}, http.StatusNotModified},
+			"weak":             {http.MethodGet, []string{"W/" + strong}, http.StatusNotModified},
+			"listed":           {http.MethodGet, []string{`"a", W/"b",` + strong}, http.StatusNotModified},
+			"second header":    {http.MethodGet, []string{`"a"`, " " + strong}, http.StatusNotModified},
 			"any":              {http.MethodGet, []string{"*"}, http.StatusNotModified},
-			"HEAD":             {http.MethodHead, []string{tag}, http.StatusNotModified},
+			"HEAD":             {http.MethodHead, []string{strong}, http.StatusNotModified},
 			"other":            {http.MethodGet, []string{`"a", W/"b"`}, http.StatusOK},
 			"empty":            {http.MethodGet, []string{" , "}, http.StatusOK},
-			"unquoted":         {http.MethodGet, []string{"abc, " + tag}, http.StatusOK},
-			"weak unquoted":    {http.MethodGet, []string{"W/abc, " + tag}, http.StatusOK},
+			"unquoted":         {http.MethodGet, []string{"abc, " + strong}, http.StatusOK},
+			"weak unquoted":    {http.MethodGet, []string{"W/abc, " + strong}, http.StatusOK},
 			"weak alone":       {http.MethodGet, []string{"W/"}, http.StatusOK},
 			"unterminated":     {http.MethodGet, []string{`"abc`}, http.StatusOK},
 			"no header":        {http.MethodGet, nil, http.StatusOK},
-			"prefix of tag":    {http.MethodGet, []string{tag[:10] + `"`}, http.StatusOK},
-			"tag without list": {http.MethodGet, []string{tag + tag}, http.StatusNotModified},
+			"prefix of tag":    {http.MethodGet, []string{strong[:10] + `"`}, http.StatusOK},
+			"tag without list": {http.MethodGet, []string{strong + strong}, http.StatusNotModified},
 		} {
 			rec := httptest.NewRecorder()
 			var status int
@@ -156,6 +167,71 @@ func Test_Etag(t *testing.T) {
 			testutil.Equal(t, name+" body", rec.Body.Len(), 0)
 			testutil.Equal(t, name+" header", rec.Header(), http.Header{"Cache-Control": {"no-cache"}, "Etag": {tag}})
 		}
+	})
+
+	t.Run("should tag with weak tags unless strong", func(t *testing.T) {
+		for name, tc := range map[string]struct {
+			fields container.Bag
+			values map[string]any
+			tag    string
+		}{
+			"default":        {container.Bag{}, nil, tagOf("hello")},
+			"strong":         {container.Bag{etag.ConfigFieldStrong: true}, nil, strongTagOf("hello")},
+			"weak":           {container.Bag{etag.ConfigFieldStrong: false}, map[string]any{etag.DefaultStrongConfigPath: true}, tagOf("hello")},
+			"strong default": {container.Bag{}, map[string]any{etag.DefaultStrongConfigPath: true}, strongTagOf("hello")},
+		} {
+			m, err := createEtag(t, tc.fields, tc.values)
+			testutil.NoError(t, err)
+			rec := httptest.NewRecorder()
+			serveEtag(m, rec, http.MethodGet, writeText(nil, "hello"))
+			testutil.Equal(t, name+" tag", rec.Header().Get("ETag"), tc.tag)
+			for _, ifNoneMatch := range []string{tagOf("hello"), strongTagOf("hello")} {
+				rec = httptest.NewRecorder()
+				serveEtag(m, rec, http.MethodGet, writeText(nil, "hello"), ifNoneMatch)
+				testutil.Equal(t, name+" status of "+ifNoneMatch, rec.Code, http.StatusNotModified)
+			}
+		}
+	})
+
+	t.Run("should tell the encodings apart by strong tags only when listed before compress", func(t *testing.T) {
+		serve := func(t *testing.T, acceptEncoding string, mws ...flam.IRestMiddleware) *httptest.ResponseRecorder {
+			t.Helper()
+			router, err := rest.NewRouter(3, mws...)
+			testutil.NoError(t, err)
+			testutil.NoError(t, router.Handle(flam.RestEndpoint{Id: 7, Pattern: "GET /items/{id}"},
+				http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(compressBody))
+				})))
+			req := httptest.NewRequest(http.MethodGet, "/items/1", nil)
+			if acceptEncoding != "" {
+				req.Header.Set("Accept-Encoding", acceptEncoding)
+			}
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			return rec
+		}
+
+		// compress listed first: the tag of the uncompressed body, shared
+		weak := newEtag(t, container.Bag{})
+		gzipped := serve(t, "gzip", newCompress(t, container.Bag{}), weak)
+		identity := serve(t, "", newCompress(t, container.Bag{}), weak)
+		testutil.Equal(t, "gzip encoding", gzipped.Header().Get("Content-Encoding"), "gzip")
+		testutil.Equal(t, "identity encoding", identity.Header().Get("Content-Encoding"), "")
+		testutil.Equal(t, "gzip tag", gzipped.Header().Get("ETag"), tagOf(compressBody))
+		testutil.Equal(t, "identity tag", identity.Header().Get("ETag"), tagOf(compressBody))
+
+		// etag listed first: the strong tags of the bodies sent, different
+		strong := newEtag(t, container.Bag{etag.ConfigFieldStrong: true})
+		gzipped = serve(t, "gzip", strong, newCompress(t, container.Bag{}))
+		identity = serve(t, "", strong, newCompress(t, container.Bag{}))
+		testutil.Equal(t, "gzip encoding", gzipped.Header().Get("Content-Encoding"), "gzip")
+		testutil.Equal(t, "strong gzip tag", gzipped.Header().Get("ETag"), strongTagOf(gzipped.Body.String()))
+		testutil.Equal(t, "strong identity tag", identity.Header().Get("ETag"), strongTagOf(compressBody))
+		if gzipped.Header().Get("ETag") == identity.Header().Get("ETag") {
+			t.Fatal("the gzip and identity responses share a strong tag")
+		}
+		testutil.Equal(t, "vary", gzipped.Header().Values("Vary"), []string{"Accept-Encoding"})
 	})
 
 	t.Run("should keep the tag the handler set", func(t *testing.T) {
@@ -396,6 +472,12 @@ func Test_Etag(t *testing.T) {
 		testutil.Error(t, errors.Unwrap(err), etag.ErrInvalidField,
 			"unable to create etag rest middleware: invalid etag rest middleware field",
 			map[string]any{etag.ErrorFieldID: "main", etag.ErrorFieldField: etag.ConfigFieldMaxSize})
+		for _, value := range []any{"true", 1} {
+			_, err = createEtag(t, container.Bag{etag.ConfigFieldStrong: value}, nil)
+			testutil.Error(t, errors.Unwrap(err), etag.ErrInvalidField,
+				"unable to create etag rest middleware: invalid etag rest middleware field",
+				map[string]any{etag.ErrorFieldID: "main", etag.ErrorFieldField: etag.ConfigFieldStrong})
+		}
 	})
 
 	t.Run("should leave the configurations of other drivers", func(t *testing.T) {

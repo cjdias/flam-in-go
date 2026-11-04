@@ -46,7 +46,10 @@ type ILock interface {
 	// [github.com/cjdias/flam-in-go/pkg/flam/lock.ErrNotHeld] when the
 	// backend no longer holds it under its token, as once released or
 	// expired, the lock then being lost when it was not yet. A lock whose
-	// release failed otherwise is still held, and may be released again.
+	// release failed otherwise, as on an error of the backend, ends all
+	// the same, its automatic refreshes stopping: its key then expires
+	// from the backend once its ttl elapsed, unless released again
+	// meanwhile.
 	Release(ctx context.Context) error
 
 	// Lost returns a channel, the same on every call, closed once the
