@@ -15,10 +15,13 @@ import (
 	"github.com/cjdias/flam-in-go/pkg/flam/rest"
 	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares"
 	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares/bodylimit"
+	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares/compress"
 	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares/cors"
 	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares/envelope"
+	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares/etag"
 	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares/log"
 	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares/requestid"
+	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares/secure"
 	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares/timeout"
 	"github.com/cjdias/flam-in-go/tests/flam/testutil"
 )
@@ -135,11 +138,16 @@ func Test_Bundles(t *testing.T) {
 			"bundle:flam.rest.middlewares.log", "provider/1",
 			"bundle:flam.rest.middlewares.jwt", "provider/1",
 			"bundle:flam.rest.middlewares.apikey", "provider/1",
+			"bundle:flam.rest.middlewares.authz", "provider/1",
 			"bundle:flam.rest.middlewares.ratelimit", "provider/1",
 			"bundle:flam.rest.middlewares.requestid", "provider/1",
 			"bundle:flam.rest.middlewares.cors", "provider/1",
 			"bundle:flam.rest.middlewares.bodylimit", "provider/1",
 			"bundle:flam.rest.middlewares.timeout", "provider/1",
+			"bundle:flam.rest.middlewares.secure", "provider/1",
+			"bundle:flam.rest.middlewares.compress", "provider/1",
+			"bundle:flam.rest.middlewares.etag", "provider/1",
+			"bundle:flam.rest.middlewares.idempotency", "provider/1",
 		})
 	})
 
@@ -197,7 +205,8 @@ func Test_Bundles(t *testing.T) {
 		testutil.NoError(t, app.Provide(func() flam.IClock { return testutil.NewClock(epoch) }))
 		bag := container.Bag{}
 		for _, b := range []flam.IBundle{config.NewBundle(), rest.NewBundle(), envelope.NewBundle(), log.NewBundle(),
-			requestid.NewBundle(), cors.NewBundle(), bodylimit.NewBundle(), timeout.NewBundle()} {
+			requestid.NewBundle(), cors.NewBundle(), bodylimit.NewBundle(), timeout.NewBundle(),
+			secure.NewBundle(), compress.NewBundle(), etag.NewBundle()} {
 			if configurable, ok := b.(flam.IConfigurableBundle); ok {
 				testutil.NoError(t, configurable.Config(bag))
 			}
@@ -208,7 +217,8 @@ func Test_Bundles(t *testing.T) {
 		testutil.NoError(t, app.Invoke(func(c flam.IConfig) error { return c.AddDefaults(bag) }))
 
 		testutil.NoError(t, app.Invoke(func(f flam.IRestMiddlewareFactory) {
-			for _, id := range []string{envelope.Id, log.Id, requestid.Id, cors.Id, bodylimit.Id, timeout.Id} {
+			for _, id := range []string{envelope.Id, log.Id, requestid.Id, cors.Id, bodylimit.Id, timeout.Id,
+				secure.Id, compress.Id, etag.Id} {
 				m, err := f.Get(id)
 				testutil.NoError(t, err)
 				testutil.Equal(t, id+" Id()", m.Id(), id)

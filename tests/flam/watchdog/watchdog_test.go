@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -246,6 +247,7 @@ func Test_Declarations(t *testing.T) {
 	testutil.Equal(t, "SignalsConfigPath", watchdog.SignalsConfigPath, "flam.watchdog.signals")
 	testutil.Equal(t, "RestartDelayConfigPath", watchdog.RestartDelayConfigPath, "flam.watchdog.restart_delay")
 	testutil.Equal(t, "RestartMaxDelayConfigPath", watchdog.RestartMaxDelayConfigPath, "flam.watchdog.restart_max_delay")
+	testutil.Equal(t, "DrainDelayConfigPath", watchdog.DrainDelayConfigPath, "flam.watchdog.drain_delay")
 	testutil.Equal(t, "ConfigFieldActive", watchdog.ConfigFieldActive, "active")
 	testutil.Equal(t, "ConfigFieldLogger", watchdog.ConfigFieldLogger, "logger")
 	testutil.Equal(t, "DefaultLoggerConfigPath", watchdog.DefaultLoggerConfigPath, "flam.watchdog.defaults.processes.logger")
@@ -414,11 +416,14 @@ func Test_Kennel_Processes(t *testing.T) {
 		"a negative delay":        {watchdog.RestartDelayConfigPath: "-1s"},
 		"an invalid maximum":      {watchdog.RestartMaxDelayConfigPath: true},
 		"a maximum shorter delay": {watchdog.RestartDelayConfigPath: "2s", watchdog.RestartMaxDelayConfigPath: "1s"},
+		"an invalid drain delay":  {watchdog.DrainDelayConfigPath: "soon"},
 	} {
 		t.Run("should fail on "+name+", closing the processes", func(t *testing.T) {
 			path := watchdog.RestartDelayConfigPath
-			if _, ok := values[watchdog.RestartMaxDelayConfigPath]; ok {
-				path = watchdog.RestartMaxDelayConfigPath
+			for _, other := range []string{watchdog.RestartMaxDelayConfigPath, watchdog.DrainDelayConfigPath} {
+				if _, ok := values[other]; ok {
+					path = other
+				}
 			}
 			api := ending("api", nil)
 			a, _ := newApp(t, values, api)
@@ -803,6 +808,129 @@ func Test_Run_Signals(t *testing.T) {
 		}
 		runs, _ := p.counts()
 		testutil.Equal(t, "runs", runs, 1)
+	})
+}
+
+// waitTimers waits for the clock to hold n timers.
+func waitTimers(t *testing.T, c *testutil.Clock, n int) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); c.Timers() != n; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("timers = %d, want %d", c.Timers(), n)
+		}
+	}
+}
+
+func Test_Run_Drain(t *testing.T) {
+	t.Run("should not drain without signal", func(t *testing.T) {
+		a, _ := newApp(t, map[string]any{watchdog.DrainDelayConfigPath: "5s"}, ending("api", nil))
+		testutil.NoError(t, run(a))
+		testutil.Equal(t, "IsDraining()", kennel(t, a).IsDraining(), false)
+	})
+
+	t.Run("should be draining on a signal without drain delay", func(t *testing.T) {
+		started := make(chan string, 1)
+		a, _ := newApp(t, nil, waiting("api", started, false))
+		k := kennel(t, a)
+
+		result := make(chan error, 1)
+		go func() { result <- run(a) }()
+		<-started
+		testutil.Equal(t, "IsDraining() before", k.IsDraining(), false)
+		testutil.NoError(t, syscall.Kill(syscall.Getpid(), syscall.SIGTERM))
+		testutil.NoError(t, <-result)
+		testutil.Equal(t, "IsDraining() after", k.IsDraining(), true)
+		testutil.Equal(t, "timers", clock(t, a).Timers(), 0)
+	})
+
+	t.Run("should drain for the delay before closing", func(t *testing.T) {
+		started := make(chan string, 1)
+		var cancelled atomic.Bool
+		p := newProcess("api", func(_ int, ctx context.Context, closed <-chan struct{}) error {
+			started <- "api"
+			<-closed
+			cancelled.Store(ctx.Err() != nil)
+			return nil
+		})
+		a, _ := newApp(t, map[string]any{watchdog.DrainDelayConfigPath: "5s"}, p)
+		k, c := kennel(t, a), clock(t, a)
+
+		result := make(chan error, 1)
+		go func() { result <- run(a) }()
+		<-started
+		testutil.NoError(t, syscall.Kill(syscall.Getpid(), syscall.SIGTERM))
+		advance(t, c, 5*time.Second)
+		testutil.NoError(t, <-result)
+		testutil.Equal(t, "cancelled", cancelled.Load(), true)
+		testutil.Equal(t, "IsDraining()", k.IsDraining(), true)
+		testutil.Equal(t, "IsRunning()", k.IsRunning(), false)
+		_, closes := p.counts()
+		testutil.Equal(t, "closes", closes, 1)
+	})
+
+	t.Run("should keep the processes running while draining", func(t *testing.T) {
+		started := make(chan string, 1)
+		p := waiting("api", started, false)
+		a, _ := newApp(t, map[string]any{watchdog.DrainDelayConfigPath: "5s"}, p)
+		k, c := kennel(t, a), clock(t, a)
+
+		result := make(chan error, 1)
+		go func() { result <- run(a) }()
+		<-started
+		testutil.NoError(t, syscall.Kill(syscall.Getpid(), syscall.SIGTERM))
+		waitTimers(t, c, 1)
+		testutil.Equal(t, "IsDraining()", k.IsDraining(), true)
+		testutil.Equal(t, "IsRunning()", k.IsRunning(), true)
+		testutil.Equal(t, "process running", p.IsRunning(), true)
+		_, closes := p.counts()
+		testutil.Equal(t, "closes while draining", closes, 0)
+
+		c.Advance(5 * time.Second)
+		testutil.NoError(t, <-result)
+		_, closes = p.counts()
+		testutil.Equal(t, "closes", closes, 1)
+	})
+
+	t.Run("should cut the drain short on a second signal", func(t *testing.T) {
+		started := make(chan string, 1)
+		p := waiting("api", started, false)
+		a, _ := newApp(t, map[string]any{watchdog.DrainDelayConfigPath: "1h"}, p)
+		c := clock(t, a)
+
+		result := make(chan error, 1)
+		go func() { result <- run(a) }()
+		<-started
+		testutil.NoError(t, syscall.Kill(syscall.Getpid(), syscall.SIGTERM))
+		waitTimers(t, c, 1)
+		testutil.NoError(t, syscall.Kill(syscall.Getpid(), syscall.SIGINT))
+		testutil.NoError(t, <-result)
+		testutil.Equal(t, "timers", c.Timers(), 0)
+		_, closes := p.counts()
+		testutil.Equal(t, "closes", closes, 1)
+	})
+
+	t.Run("should not close the kennel when the processes end while draining", func(t *testing.T) {
+		started, release := make(chan string, 1), make(chan struct{})
+		p := newProcess("api", func(int, context.Context, <-chan struct{}) error {
+			started <- "api"
+			<-release
+			return nil
+		})
+		a, _ := newApp(t, map[string]any{watchdog.DrainDelayConfigPath: "1h"}, p)
+		k, c := kennel(t, a), clock(t, a)
+
+		result := make(chan error, 1)
+		go func() { result <- run(a) }()
+		<-started
+		testutil.NoError(t, syscall.Kill(syscall.Getpid(), syscall.SIGTERM))
+		waitTimers(t, c, 1)
+		close(release)
+		testutil.NoError(t, <-result)
+		testutil.Equal(t, "timers", c.Timers(), 0)
+		testutil.Equal(t, "IsDraining()", k.IsDraining(), true)
+		_, closes := p.counts()
+		testutil.Equal(t, "closes", closes, 0)
+		testutil.NoError(t, closeBundle(a))
 	})
 }
 

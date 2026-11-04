@@ -4,8 +4,13 @@ import (
 	"context"
 	"maps"
 	"slices"
+	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
+	"time"
+
+	"go.uber.org/dig"
 
 	"github.com/cjdias/flam-in-go/pkg/flam"
 	"github.com/cjdias/flam-in-go/pkg/flam/container"
@@ -33,6 +38,7 @@ type kennel struct {
 	processes map[string]*process
 	inactive  map[string]bool
 	running   atomic.Bool
+	draining  atomic.Bool
 }
 
 func (k *kennel) Available() []string {
@@ -54,6 +60,8 @@ func (k *kennel) Process(id string) (flam.IWatchdogProcess, bool) {
 }
 
 func (k *kennel) IsRunning() bool { return k.running.Load() }
+
+func (k *kennel) IsDraining() bool { return k.draining.Load() }
 
 // kennelBundle provides the kennel.
 type kennelBundle struct{ k *kennel }
@@ -83,9 +91,45 @@ func realKennelApp(t *testing.T) *testutil.App {
 	return newApp(t, nil, watchdog.NewBundle(), kennelcheck.NewBundle())
 }
 
+// blockingProcess is a flam.IWatchdogProcess signaling started once it
+// runs, and running until closed.
+type blockingProcess struct {
+	started chan struct{}
+	closed  chan struct{}
+	once    sync.Once
+	running atomic.Bool
+}
+
+func (p *blockingProcess) Id() string { return "api" }
+
+func (p *blockingProcess) Run(context.Context) error {
+	p.running.Store(true)
+	defer p.running.Store(false)
+	close(p.started)
+	<-p.closed
+	return nil
+}
+
+func (p *blockingProcess) IsRunning() bool { return p.running.Load() }
+
+func (p *blockingProcess) Close() error {
+	p.once.Do(func() { close(p.closed) })
+	return nil
+}
+
+// processBundle provides the process in the watchdog process group.
+type processBundle struct{ p *blockingProcess }
+
+func (processBundle) Id() string { return "process" }
+
+func (b processBundle) Register(a flam.IApp) error {
+	return a.Provide(func() flam.IWatchdogProcess { return b.p }, dig.Group(watchdog.ProcessGroup))
+}
+
 func Test_Kennel_Declarations(t *testing.T) {
 	testutil.Equal(t, "Driver", kennelcheck.Driver, "flam.health.checks.driver.kennel")
 	testutil.Equal(t, "ConfigFieldProcesses", kennelcheck.ConfigFieldProcesses, "processes")
+	testutil.Equal(t, "ConfigFieldDraining", kennelcheck.ConfigFieldDraining, "draining")
 	testutil.Equal(t, "ErrorFieldID", kennelcheck.ErrorFieldID, "id")
 	testutil.Equal(t, "ErrorFieldField", kennelcheck.ErrorFieldField, "field")
 	testutil.Equal(t, "ErrorFieldProcess", kennelcheck.ErrorFieldProcess, "process")
@@ -111,6 +155,7 @@ func Test_Kennel_Create(t *testing.T) {
 			{container.Bag{health.ConfigFieldKind: "none"}, health.ConfigFieldKind},
 			{container.Bag{kennelcheck.ConfigFieldProcesses: "api"}, kennelcheck.ConfigFieldProcesses},
 			{container.Bag{kennelcheck.ConfigFieldProcesses: []any{"api", 1}}, kennelcheck.ConfigFieldProcesses},
+			{container.Bag{kennelcheck.ConfigFieldDraining: "yes"}, kennelcheck.ConfigFieldDraining},
 		} {
 			a, _ := kennelApp(t)
 			check, err := creatorOf(t, a).Create(checkBag("servers", kennelcheck.Driver, tc.fields))
@@ -196,6 +241,71 @@ func Test_Kennel_Check(t *testing.T) {
 		check, err := creatorOf(t, a).Create(checkBag("servers", kennelcheck.Driver, nil))
 		testutil.NoError(t, err)
 		testutil.NoError(t, check.Check(context.Background()))
+	})
+
+	t.Run("should fail while the kennel drains", func(t *testing.T) {
+		a, k := kennelApp(t)
+		for _, p := range k.processes {
+			p.running.Store(true)
+		}
+		check, err := creatorOf(t, a).Create(checkBag("servers", kennelcheck.Driver, nil))
+		testutil.NoError(t, err)
+		testutil.NoError(t, check.Check(context.Background()))
+
+		k.draining.Store(true)
+		testutil.Error(t, check.Check(context.Background()), kennelcheck.ErrDraining,
+			"kennel health check failed: watchdog kennel draining",
+			map[string]any{kennelcheck.ErrorFieldID: "servers"})
+
+		k.running.Store(false)
+		testutil.Error(t, check.Check(context.Background()), kennelcheck.ErrDraining,
+			"kennel health check failed: watchdog kennel draining",
+			map[string]any{kennelcheck.ErrorFieldID: "servers"})
+	})
+
+	t.Run("should ignore the drain when configured", func(t *testing.T) {
+		a, k := kennelApp(t)
+		for _, p := range k.processes {
+			p.running.Store(true)
+		}
+		k.draining.Store(true)
+		check, err := creatorOf(t, a).Create(checkBag("servers", kennelcheck.Driver, container.Bag{
+			kennelcheck.ConfigFieldDraining: false,
+		}))
+		testutil.NoError(t, err)
+		testutil.NoError(t, check.Check(context.Background()))
+	})
+
+	t.Run("should fail while the kennel of the watchdog drains", func(t *testing.T) {
+		p := &blockingProcess{started: make(chan struct{}), closed: make(chan struct{})}
+		a := newApp(t, map[string]any{watchdog.DrainDelayConfigPath: "5s"},
+			watchdog.NewBundle(), processBundle{p}, kennelcheck.NewBundle())
+		check, err := creatorOf(t, a).Create(checkBag("servers", kennelcheck.Driver, nil))
+		testutil.NoError(t, err)
+		var c flam.IClock
+		testutil.NoError(t, a.Invoke(func(clock flam.IClock) { c = clock }))
+		clock := c.(*testutil.Clock)
+
+		result := make(chan error, 1)
+		go func() { result <- watchdog.NewBundle().(flam.IRunnableBundle).Run(a) }()
+		<-p.started
+		testutil.NoError(t, check.Check(context.Background()))
+
+		testutil.NoError(t, syscall.Kill(syscall.Getpid(), syscall.SIGTERM))
+		for deadline := time.Now().Add(5 * time.Second); clock.Timers() != 1; time.Sleep(time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatal("no drain timer")
+			}
+		}
+		testutil.Equal(t, "running", p.IsRunning(), true)
+		testutil.Error(t, check.Check(context.Background()), kennelcheck.ErrDraining,
+			"kennel health check failed: watchdog kennel draining",
+			map[string]any{kennelcheck.ErrorFieldID: "servers"})
+
+		clock.Advance(5 * time.Second)
+		testutil.NoError(t, <-result)
+		testutil.Equal(t, "running", p.IsRunning(), false)
+		testutil.NoError(t, watchdog.NewBundle().(flam.IClosableBundle).Close(a))
 	})
 
 	t.Run("should check the kennel of the watchdog", func(t *testing.T) {

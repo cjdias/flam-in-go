@@ -10,8 +10,8 @@ var (
 	// ErrInvalidField is the error wrapped by the error returned from the
 	// creator when a field of the check configuration, or its default,
 	// does not hold a value of the expected type: a kind read by
-	// [github.com/cjdias/flam-in-go/pkg/flam/health.ParseKind] and a list
-	// of process ids.
+	// [github.com/cjdias/flam-in-go/pkg/flam/health.ParseKind], a list
+	// of process ids and a bool.
 	ErrInvalidField = errors.New("invalid kennel health check field")
 
 	// ErrNoKennel is the error wrapped by the error returned from the
@@ -29,6 +29,11 @@ var (
 	// processes, by the error of a check when processes it watches are
 	// active in the kennel but not running.
 	ErrNotRunning = errors.New("watchdog process not running")
+
+	// ErrDraining is the error wrapped by the error of a check while the
+	// kennel drains on a signal, unless its [ConfigFieldDraining] field
+	// holds false.
+	ErrDraining = errors.New("watchdog kennel draining")
 )
 
 // newErr returns the error wrapping the sentinel with the message and the

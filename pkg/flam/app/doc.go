@@ -8,9 +8,9 @@
 // pubsub, trigger, disk, configuration and log ones, as listed by New.
 // Register only the other bundles, and decorate, rather than provide
 // again, a value a core bundle provides, such as the clock in a test. The
-// other features of flam, database, migration, redis, cache, translator,
-// validator, secrets, client, broker, tracing, metrics, rest, health,
-// command and watchdog, are opt-in: register their bundles, or use the
+// other features of flam, database, migration, mongo, redis, lock, cache,
+// translator, validator, secrets, client, broker, jobs, outbox, scheduler,
+// tracing, metrics, rest, grpc, health, command and watchdog, are opt-in: register their bundles, or use the
 // application of [github.com/cjdias/flam-in-go/pkg/flam/app/full.New],
 // which registers them all but command. They live in packages of their own, so that a
 // program links only the features it registers.

@@ -14,6 +14,11 @@ import (
 // the broker fields. It configures no broker. Its brokers use the
 // [flam.IBrokerKafkaClient] of the container, when provided, and kafka-go
 // otherwise.
+//
+// The creator also takes the tracer provider, the propagator and the
+// Prometheus registerer from the container, when provided, to trace and
+// measure the messages of the brokers, as described by
+// [github.com/cjdias/flam-in-go/pkg/flam/broker].
 func NewBundle() flam.IBundle {
 	return &bundleImpl{}
 }

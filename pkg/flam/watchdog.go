@@ -81,4 +81,11 @@ type IKennel interface {
 	// IsRunning reports whether the kennel runs its active processes, such
 	// as for the health checks of the application.
 	IsRunning() bool
+
+	// IsDraining reports whether the kennel is shutting down on a signal:
+	// it drains first, for a configured delay, its processes still
+	// running, before closing them, so that the readiness probe of the
+	// application, reading it, fails while the servers keep serving. It
+	// stays true once set, as a closed kennel never runs again.
+	IsDraining() bool
 }

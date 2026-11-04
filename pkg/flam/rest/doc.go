@@ -55,6 +55,24 @@
 // items with their
 // [github.com/cjdias/flam-in-go/pkg/flam/envelope.Pagination].
 //
+// A [Router] lists the endpoints it registered, as a
+// [github.com/cjdias/flam-in-go/pkg/flam.IRestEndpointLister], so that
+// [github.com/cjdias/flam-in-go/pkg/flam/rest/openapi] documents them
+// from the documentation fields of their
+// [github.com/cjdias/flam-in-go/pkg/flam.RestEndpoint].
+//
+// An endpoint streaming its response sets the Streaming field of its
+// [github.com/cjdias/flam-in-go/pkg/flam.RestEndpoint], so that the
+// timeout middleware passes its requests through rather than buffering
+// them, and is not to be wrapped in the middlewares compressing the
+// responses, or computing their ETag. [NewEventStream] streams
+// Server-Sent Events. A WebSocket takes the connection over with the
+// Hijack method of an [http.ResponseController] made of the writer given
+// to the handler, which reaches the writer of the server through the
+// Unwrap methods of the writers of the middlewares, such as the one of
+// [NewResponseWriter], the upgrade being done by a WebSocket module of the
+// application.
+//
 // As a process of the kennel, a server also reports its start and its end
 // to its watchdog logger adaptor, configured at
 // [watchdog.ProcessConfigPath] by its id, along with its own logger

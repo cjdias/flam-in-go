@@ -7,7 +7,10 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"net/http"
+	"net/url"
 	"os"
+	"time"
 
 	gojwt "github.com/golang-jwt/jwt/v5"
 	"go.uber.org/dig"
@@ -22,8 +25,9 @@ import (
 type creatorArgs struct {
 	dig.In
 
-	Config flam.IConfig
-	Clock  flam.IClock
+	Config  flam.IConfig
+	Clock   flam.IClock
+	Clients flam.IClientFactory `optional:"true"`
 }
 
 // newCreator returns the [flam.IRestMiddlewareCreator] of the jwt
@@ -34,16 +38,18 @@ func newCreator(
 	args creatorArgs,
 ) flam.IRestMiddlewareCreator {
 	return &creator{
-		config: args.Config,
-		clock:  args.Clock,
+		config:  args.Config,
+		clock:   args.Clock,
+		clients: args.Clients,
 	}
 }
 
 // creator is the [flam.IRestMiddlewareCreator] of the configurations with
 // the [Driver] driver.
 type creator struct {
-	config flam.IConfig
-	clock  flam.IClock
+	config  flam.IConfig
+	clock   flam.IClock
+	clients flam.IClientFactory
 }
 
 func (c *creator) Accept(
@@ -52,10 +58,11 @@ func (c *creator) Accept(
 	return bag.String(factory.ConfigFieldDriver) == Driver
 }
 
-// Create returns the middleware of the algorithms, the key, the issuer,
-// the audience, the leeway, the optionality and the expiration
+// Create returns the middleware of the algorithms, the key or the key set,
+// the issuer, the audience, the leeway, the optionality and the expiration
 // requirement of the configuration, or of their defaults, checking that
-// every algorithm fits the key.
+// every algorithm fits the key. No key set is fetched before a token needs
+// it.
 func (c *creator) Create(
 	bag flam.IBag,
 ) (flam.IRestMiddleware, error) {
@@ -68,18 +75,16 @@ func (c *creator) Create(
 	if !ok || len(names) == 0 {
 		return fail(ConfigFieldAlgorithms, nil)
 	}
-	key, field, err := c.key(bag)
-	if err != nil {
+	keys, field, err := c.keyring(bag, names)
+	if keys == nil {
 		return fail(field, err)
-	}
-	for _, name := range names {
-		if err := creatorFits(name, key); err != nil {
-			return fail(ConfigFieldAlgorithms, err)
-		}
 	}
 	issuer, ok := c.field(bag, ConfigFieldIssuer, DefaultIssuerConfigPath, defaultIssuer).(string)
 	if !ok {
 		return fail(ConfigFieldIssuer, nil)
+	}
+	if set, isSet := keys.(*jwks); isSet && issuer == "" {
+		issuer = set.issuer
 	}
 	audience, ok := c.field(bag, ConfigFieldAudience, DefaultAudienceConfigPath, defaultAudience).(string)
 	if !ok {
@@ -115,7 +120,7 @@ func (c *creator) Create(
 	return &middleware{
 		id:       id,
 		parser:   gojwt.NewParser(options...),
-		key:      key,
+		keys:     keys,
 		optional: optional,
 	}, nil
 }
@@ -132,46 +137,141 @@ func (c *creator) field(
 	return settings.Field(c.config, bag, field, defaultPath, builtIn)
 }
 
-// key returns the verification key of the configuration: the secret as
-// bytes, or the public key decoded from the PEM of the public key field or
-// of the public key file. It fails, along with the field at fault, when
-// none, or more than one, of the three fields is set, or a field is not a
-// string, or the public key cannot be read or decoded.
-func (c *creator) key(
+// keyring returns the keyring of the configuration: the secret as bytes,
+// the public key decoded from the PEM of the public key field or of the
+// public key file, or the key set of the JWKS URL or of the issuer URL,
+// checking that every algorithm of the names fits it. It fails, along with
+// the field at fault, when none, or more than one, of the five fields is
+// set, or a field is not a string, or the key cannot be read or decoded,
+// or a URL is not an absolute https one, or an algorithm does not fit.
+func (c *creator) keyring(
 	bag flam.IBag,
-) (any, string, error) {
-	fields := []string{ConfigFieldSecret, ConfigFieldPublicKey, ConfigFieldPublicKeyFile}
-	values := make([]string, len(fields))
-	set := ""
-	for i, field := range fields {
-		value, ok := c.field(bag, field, "", "").(string)
+	names []string,
+) (keyring, string, error) {
+	fields := []string{ConfigFieldSecret, ConfigFieldPublicKey, ConfigFieldPublicKeyFile, ConfigFieldJWKSURL, ConfigFieldIssuerURL}
+	value, set := "", ""
+	for _, field := range fields {
+		v, ok := c.field(bag, field, "", "").(string)
 		if !ok {
 			return nil, field, errNotString
 		}
-		if value == "" {
+		if v == "" {
 			continue
 		}
 		if set != "" {
 			return nil, field, errKeyConflict
 		}
-		values[i], set = value, field
+		value, set = v, field
 	}
 
 	switch set {
-	case ConfigFieldSecret:
-		return []byte(values[0]), set, nil
-	case ConfigFieldPublicKey:
-		key, err := creatorPublicKey([]byte(values[1]))
-		return key, set, err
-	case ConfigFieldPublicKeyFile:
-		data, err := os.ReadFile(values[2])
-		if err != nil {
-			return nil, set, err
+	case "":
+		return nil, ConfigFieldSecret, errNoKey
+	case ConfigFieldJWKSURL, ConfigFieldIssuerURL:
+		if !creatorHTTPS(value) {
+			return nil, set, errNotHTTPS
 		}
-		key, err := creatorPublicKey(data)
-		return key, set, err
+		for _, name := range names {
+			if err := creatorAsymmetric(name); err != nil {
+				return nil, ConfigFieldAlgorithms, err
+			}
+		}
+		return c.jwks(bag, set, value)
 	}
-	return nil, ConfigFieldSecret, errNoKey
+	key, err := creatorKey(set, value)
+	if err != nil {
+		return nil, set, err
+	}
+	for _, name := range names {
+		if err := creatorFits(name, key); err != nil {
+			return nil, ConfigFieldAlgorithms, err
+		}
+	}
+	return staticKey{value: key}, "", nil
+}
+
+// jwks returns the key set of the address of the field, the JWKS URL or the
+// issuer URL, fetched with the client of the configuration, and refreshed
+// as its durations tell, failing along with the field at fault.
+func (c *creator) jwks(
+	bag flam.IBag,
+	field string,
+	address string,
+) (keyring, string, error) {
+	durations := map[string]time.Duration{}
+	for _, d := range []struct {
+		field       string
+		defaultPath string
+		builtIn     time.Duration
+	}{
+		{ConfigFieldJWKSRefresh, DefaultJWKSRefreshConfigPath, defaultJWKSRefresh},
+		{ConfigFieldJWKSMinRefresh, DefaultJWKSMinRefreshConfigPath, defaultJWKSMinRefresh},
+		{ConfigFieldJWKSTimeout, DefaultJWKSTimeoutConfigPath, defaultJWKSTimeout},
+	} {
+		value, ok := settings.Duration(c.field(bag, d.field, d.defaultPath, d.builtIn))
+		if !ok || value == 0 {
+			return nil, d.field, nil
+		}
+		durations[d.field] = value
+	}
+	id, ok := c.field(bag, ConfigFieldJWKSClient, DefaultJWKSClientConfigPath, defaultJWKSClient).(string)
+	if !ok {
+		return nil, ConfigFieldJWKSClient, nil
+	}
+	var client jwksClient = &http.Client{}
+	if id != "" {
+		if c.clients == nil {
+			return nil, ConfigFieldJWKSClient, errNoClientFactory
+		}
+		var err error
+		if client, err = c.clients.Get(id); err != nil {
+			return nil, ConfigFieldJWKSClient, err
+		}
+	}
+
+	set := &jwks{
+		clock:      c.clock,
+		client:     client,
+		refresh:    durations[ConfigFieldJWKSRefresh],
+		minRefresh: durations[ConfigFieldJWKSMinRefresh],
+		timeout:    durations[ConfigFieldJWKSTimeout],
+	}
+	if field == ConfigFieldJWKSURL {
+		set.url = address
+	} else {
+		set.issuer = address
+	}
+	return set, "", nil
+}
+
+// creatorKey returns the key of the value of the field: the secret as
+// bytes, or the public key decoded from the PEM of the public key field
+// or of the public key file.
+func creatorKey(
+	field string,
+	value string,
+) (any, error) {
+	switch field {
+	case ConfigFieldSecret:
+		return []byte(value), nil
+	case ConfigFieldPublicKey:
+		return creatorPublicKey([]byte(value))
+	}
+	data, err := os.ReadFile(value)
+	if err != nil {
+		return nil, err
+	}
+	return creatorPublicKey(data)
+}
+
+// creatorHTTPS reports whether the value is an absolute https URL, with a
+// host, and without user information, query or fragment.
+func creatorHTTPS(
+	value string,
+) bool {
+	u, err := url.Parse(value)
+	return err == nil && u.Scheme == "https" && u.Host != "" && u.User == nil &&
+		u.RawQuery == "" && u.Fragment == "" && !u.ForceQuery
 }
 
 // creatorPublicKey returns the RSA, ECDSA or Ed25519 public key of the
@@ -248,6 +348,20 @@ func creatorFits(
 	return errKeyMismatch
 }
 
+// creatorAsymmetric checks that the algorithm of the name is a known
+// public key signing algorithm, the only ones verified with a key set.
+func creatorAsymmetric(
+	name string,
+) error {
+	switch gojwt.GetSigningMethod(name).(type) {
+	case *gojwt.SigningMethodRSA, *gojwt.SigningMethodRSAPSS, *gojwt.SigningMethodECDSA, *gojwt.SigningMethodEd25519:
+		return nil
+	case *gojwt.SigningMethodHMAC:
+		return errKeyMismatch
+	}
+	return errAlgorithm
+}
+
 // creatorMinRSABits is the minimum size of an RSA key.
 const creatorMinRSABits = 2048
 
@@ -256,14 +370,16 @@ const creatorCreateMessage = "unable to create jwt rest middleware"
 
 // Causes of the invalid configurations, joined to ErrInvalidField.
 var (
-	errNotString   = errors.New("key field not a string")
-	errNoKey       = errors.New("one of secret, public_key or public_key_file must be set")
-	errKeyConflict = errors.New("only one of secret, public_key or public_key_file may be set")
-	errNoPEM       = errors.New("no PEM block found")
-	errKeyType     = errors.New("public key not of RSA, ECDSA or Ed25519 type")
-	errAlgorithm   = errors.New("unknown or unsigned algorithm")
-	errKeyMismatch = errors.New("algorithm not fitting the key")
-	errShortSecret = errors.New("secret shorter than the hash of the algorithm")
-	errShortRSAKey = errors.New("rsa key shorter than 2048 bits")
-	errCurve       = errors.New("ecdsa key not of the curve of the algorithm")
+	errNotString       = errors.New("key field not a string")
+	errNoKey           = errors.New("one of secret, public_key, public_key_file, jwks_url or issuer_url must be set")
+	errKeyConflict     = errors.New("only one of secret, public_key, public_key_file, jwks_url or issuer_url may be set")
+	errNotHTTPS        = errors.New("url not an absolute https url")
+	errNoClientFactory = errors.New("no client factory, register the client bundle")
+	errNoPEM           = errors.New("no PEM block found")
+	errKeyType         = errors.New("public key not of RSA, ECDSA or Ed25519 type")
+	errAlgorithm       = errors.New("unknown or unsigned algorithm")
+	errKeyMismatch     = errors.New("algorithm not fitting the key")
+	errShortSecret     = errors.New("secret shorter than the hash of the algorithm")
+	errShortRSAKey     = errors.New("rsa key shorter than 2048 bits")
+	errCurve           = errors.New("ecdsa key not of the curve of the algorithm")
 )

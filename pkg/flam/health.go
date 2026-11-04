@@ -58,6 +58,16 @@ type IHealthCheck interface {
 	Check(ctx context.Context) error
 }
 
+// IHealthPinger is implemented by the resources able to tell cheaply
+// whether their backend answers, such as an [IBroker] whose driver
+// implements it, for the health checks of the application, which ping
+// them rather than doing an actual work with them. Ping returns nil when
+// the backend answers, or the error telling why it does not, ending once
+// its context is done.
+type IHealthPinger interface {
+	Ping(ctx context.Context) error
+}
+
 // IHealthCheckCreator creates the health checks of a driver, for the
 // [IHealthCheckFactory].
 type IHealthCheckCreator = IResourceCreator[IHealthCheck]

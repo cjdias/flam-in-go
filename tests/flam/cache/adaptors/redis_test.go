@@ -171,6 +171,7 @@ func Test_Bundles(t *testing.T) {
 		testutil.Equal(t, "calls", app.Calls(), []string{
 			"bundle:flam.cache.adaptors", "bundle:flam.cache.adaptors.redis", "provider/1",
 			"bundle:flam.cache.adaptors.memory", "provider/1",
+			"bundle:flam.cache.adaptors.invalidating", "provider/1",
 		})
 	})
 
@@ -419,6 +420,31 @@ func Test_Adaptor(t *testing.T) {
 		_, err = a.Get(context.Background(), &user{Id: 1})
 		testutil.Error(t, err, errBoom, "unable to get from redis cache: boom",
 			map[string]any{redis.ErrorFieldID: "main", cache.ErrorFieldKey: "adaptors.user:1"})
+	})
+
+	t.Run("should tell the keys and delete by key", func(t *testing.T) {
+		a, c := newAdaptor(t)
+		keyed, ok := a.(flam.ICacheKeyedAdaptor)
+		testutil.Equal(t, "keyed", ok, true)
+		keys, err := keyed.Keys(&user{Id: 1}, &user{Id: 2})
+		testutil.NoError(t, err)
+		testutil.Equal(t, "Keys()", keys, []string{"adaptors.user:1", "adaptors.user:2"})
+		keys, err = keyed.Keys()
+		testutil.NoError(t, err)
+		testutil.Equal(t, "Keys() of none", keys, []string{})
+
+		testutil.NoError(t, a.Set(context.Background(), &user{Id: 1}, &user{Id: 2}, &user{Id: 3}))
+		var ctx context.Context // replaced with context.Background
+		testutil.NoError(t, keyed.DelKeys(ctx, "adaptors.user:1", "adaptors.user:3", "missing"))
+		testutil.NoError(t, keyed.DelKeys(context.Background()))
+		server, _ := mini.Server(c)
+		testutil.Equal(t, "keys", server.Keys(), []string{"adaptors.user:2"})
+
+		g, s, _ := parts(t)
+		failing, err := redis.NewAdaptor("main", failingGenerator{g}, s, c)
+		testutil.NoError(t, err)
+		_, err = failing.(flam.ICacheKeyedAdaptor).Keys(&user{Id: 1}, &user{Name: "bad"})
+		testutil.Error(t, err, errBoom, "unable to get redis cache keys: boom", map[string]any{redis.ErrorFieldID: "main"})
 	})
 
 	t.Run("should fail with the errors of the store", func(t *testing.T) {

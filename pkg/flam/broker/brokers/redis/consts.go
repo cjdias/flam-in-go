@@ -12,6 +12,10 @@ const bundleId = "flam.broker.brokers.redis"
 // of their configuration.
 const Driver = "flam.broker.brokers.driver.redis"
 
+// messagingSystem is the messaging system of the spans of the brokers,
+// held by their "messaging.system" attribute.
+const messagingSystem = "redis"
+
 // Modes of a redis broker, held by its [ConfigFieldMode] field.
 const (
 	// ModePubSub publishes with PUBLISH and subscribes with SUBSCRIBE,

@@ -37,4 +37,12 @@
 // middleware, as the middlewares are applied in the order the server
 // lists them, the first one being the outermost, so that the requests
 // reach the log middleware holding their id.
+//
+// When the logger is a
+// [github.com/cjdias/flam-in-go/pkg/flam.IContextLogger], as the one of
+// the log bundle is, both entries are given with the context of the
+// request, so that they also hold the fields its extractors extract from
+// it, such as the ids of the OpenTelemetry trace and span of the request,
+// and its id and principal with the bundle of
+// [github.com/cjdias/flam-in-go/pkg/flam/rest/logcontext].
 package log

@@ -212,6 +212,10 @@ func Test_Jwt_Bundle(t *testing.T) {
 			jwt.DefaultLeewayConfigPath:              "0s",
 			jwt.DefaultOptionalConfigPath:            false,
 			jwt.DefaultRequireExpirationConfigPath:   true,
+			jwt.DefaultJWKSRefreshConfigPath:         "1h0m0s",
+			jwt.DefaultJWKSMinRefreshConfigPath:      "1m0s",
+			jwt.DefaultJWKSTimeoutConfigPath:         "10s",
+			jwt.DefaultJWKSClientConfigPath:          "",
 		} {
 			testutil.Equal(t, path, bag.Get(path), want)
 		}
@@ -224,6 +228,10 @@ func Test_Jwt_Bundle(t *testing.T) {
 			jwt.DefaultLeewayConfigPath:            "flam.rest.defaults.middlewares.jwt.leeway",
 			jwt.DefaultOptionalConfigPath:          "flam.rest.defaults.middlewares.jwt.optional",
 			jwt.DefaultRequireExpirationConfigPath: "flam.rest.defaults.middlewares.jwt.require_expiration",
+			jwt.DefaultJWKSRefreshConfigPath:       "flam.rest.defaults.middlewares.jwt.jwks_refresh",
+			jwt.DefaultJWKSMinRefreshConfigPath:    "flam.rest.defaults.middlewares.jwt.jwks_min_refresh",
+			jwt.DefaultJWKSTimeoutConfigPath:       "flam.rest.defaults.middlewares.jwt.jwks_timeout",
+			jwt.DefaultJWKSClientConfigPath:        "flam.rest.defaults.middlewares.jwt.jwks_client",
 		} {
 			testutil.Equal(t, "path", got, want)
 		}
@@ -304,11 +312,11 @@ func Test_Jwt_Create(t *testing.T) {
 			"algorithms default": {container.Bag{jwt.ConfigFieldSecret: jwtSecret}, map[string]any{jwt.DefaultAlgorithmsConfigPath: 1}, jwt.ConfigFieldAlgorithms, ""},
 			"algorithm none":     {container.Bag{jwt.ConfigFieldAlgorithms: []any{"HS256", "none"}, jwt.ConfigFieldSecret: jwtSecret}, nil, jwt.ConfigFieldAlgorithms, "unknown or unsigned algorithm"},
 			"algorithm unknown":  {container.Bag{jwt.ConfigFieldAlgorithms: []any{"XX256"}, jwt.ConfigFieldSecret: jwtSecret}, nil, jwt.ConfigFieldAlgorithms, "unknown or unsigned algorithm"},
-			"no key":             {container.Bag{}, nil, jwt.ConfigFieldSecret, "one of secret, public_key or public_key_file must be set"},
+			"no key":             {container.Bag{}, nil, jwt.ConfigFieldSecret, "one of secret, public_key, public_key_file, jwks_url or issuer_url must be set"},
 			"secret type":        {container.Bag{jwt.ConfigFieldSecret: 1}, nil, jwt.ConfigFieldSecret, "key field not a string"},
 			"public key type":    {container.Bag{jwt.ConfigFieldPublicKey: true}, nil, jwt.ConfigFieldPublicKey, "key field not a string"},
-			"two keys":           {container.Bag{jwt.ConfigFieldSecret: jwtSecret, jwt.ConfigFieldPublicKey: rsaPKIX}, nil, jwt.ConfigFieldPublicKey, "only one of secret, public_key or public_key_file may be set"},
-			"key and file":       {container.Bag{jwt.ConfigFieldPublicKey: rsaPKIX, jwt.ConfigFieldPublicKeyFile: "key.pem"}, nil, jwt.ConfigFieldPublicKeyFile, "only one of secret, public_key or public_key_file may be set"},
+			"two keys":           {container.Bag{jwt.ConfigFieldSecret: jwtSecret, jwt.ConfigFieldPublicKey: rsaPKIX}, nil, jwt.ConfigFieldPublicKey, "only one of secret, public_key, public_key_file, jwks_url or issuer_url may be set"},
+			"key and file":       {container.Bag{jwt.ConfigFieldPublicKey: rsaPKIX, jwt.ConfigFieldPublicKeyFile: "key.pem"}, nil, jwt.ConfigFieldPublicKeyFile, "only one of secret, public_key, public_key_file, jwks_url or issuer_url may be set"},
 			"no pem":             {container.Bag{jwt.ConfigFieldAlgorithms: []any{"RS256"}, jwt.ConfigFieldPublicKey: "not a pem"}, nil, jwt.ConfigFieldPublicKey, "no PEM block found"},
 			"x25519 key":         {container.Bag{jwt.ConfigFieldAlgorithms: []any{"EdDSA"}, jwt.ConfigFieldPublicKey: jwtPKIX(t, keys.x25519.PublicKey())}, nil, jwt.ConfigFieldPublicKey, "public key not of RSA, ECDSA or Ed25519 type"},
 			"short secret":       {container.Bag{jwt.ConfigFieldSecret: jwtSecret[:31]}, nil, jwt.ConfigFieldAlgorithms, "secret shorter than the hash of the algorithm"},

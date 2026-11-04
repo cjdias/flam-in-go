@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -36,9 +37,13 @@ type connection struct {
 }
 
 // ownedConnection is the [flam.IDatabaseConnection] returned by
-// [NewConnection], and created by the connection creator, owning its pool.
+// [NewConnection], and created by the connection creator, owning its pool
+// and, for a connection with read replicas or extra sources, the gorm
+// databases the pools of those were opened in.
 type ownedConnection struct {
 	*connection
+
+	pools []*gorm.DB
 }
 
 // compile time checks that *connection and *ownedConnection implement
@@ -49,16 +54,14 @@ var (
 )
 
 // Close closes the pool of the connection, which also ends the
-// connections derived from it.
+// connections derived from it, and the pools of its read replicas and
+// extra sources, even when one fails, returning their errors joined.
 func (c *ownedConnection) Close() error {
-	db, err := c.db.DB()
-	if err != nil {
-		return newErrClose(connectionCloseMessage, c.id, err)
+	err := connectionClose(c.id, c.db)
+	for _, pool := range c.pools {
+		err = errors.Join(err, connectionClose(c.id, pool))
 	}
-	if err := db.Close(); err != nil {
-		return newErrClose(connectionCloseMessage, c.id, err)
-	}
-	return nil
+	return err
 }
 
 func (c *connection) Id() string {
@@ -533,6 +536,22 @@ func (c *connection) derive(
 	tx *gorm.DB,
 ) flam.IDatabaseConnection {
 	return &connection{id: c.id, db: tx.Session(&gorm.Session{})}
+}
+
+// connectionClose closes the pool of the gorm database of the connection
+// of the id.
+func connectionClose(
+	id string,
+	db *gorm.DB,
+) error {
+	pool, err := db.DB()
+	if err != nil {
+		return newErrClose(connectionCloseMessage, id, err)
+	}
+	if err := pool.Close(); err != nil {
+		return newErrClose(connectionCloseMessage, id, err)
+	}
+	return nil
 }
 
 // Messages of the errors of the connections.

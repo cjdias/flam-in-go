@@ -20,7 +20,9 @@ import (
 // reading the principal.
 //
 // The creator takes the [flam.IClock] from the container: register the
-// clock bundle.
+// clock bundle. It also takes the [flam.IClientFactory], when the
+// container provides one, for the middlewares naming their
+// [ConfigFieldJWKSClient].
 func NewBundle() flam.IBundle {
 	return &bundleImpl{}
 }
@@ -46,6 +48,10 @@ func (b *bundleImpl) Config(
 		DefaultLeewayConfigPath:              defaultLeeway.String(),
 		DefaultOptionalConfigPath:            defaultOptional,
 		DefaultRequireExpirationConfigPath:   defaultRequireExpiration,
+		DefaultJWKSRefreshConfigPath:         defaultJWKSRefresh.String(),
+		DefaultJWKSMinRefreshConfigPath:      defaultJWKSMinRefresh.String(),
+		DefaultJWKSTimeoutConfigPath:         defaultJWKSTimeout.String(),
+		DefaultJWKSClientConfigPath:          defaultJWKSClient,
 	} {
 		if err := bag.Set(path, value); err != nil {
 			return err

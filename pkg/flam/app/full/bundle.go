@@ -15,9 +15,17 @@ import (
 	"github.com/cjdias/flam-in-go/pkg/flam/database"
 	"github.com/cjdias/flam-in-go/pkg/flam/database/configs"
 	"github.com/cjdias/flam-in-go/pkg/flam/database/dialects"
+	"github.com/cjdias/flam-in-go/pkg/flam/grpc"
+	grpcinterceptors "github.com/cjdias/flam-in-go/pkg/flam/grpc/interceptors"
+	grpcloggers "github.com/cjdias/flam-in-go/pkg/flam/grpc/loggers"
+	grpcservers "github.com/cjdias/flam-in-go/pkg/flam/grpc/servers"
 	"github.com/cjdias/flam-in-go/pkg/flam/health"
 	healthchecks "github.com/cjdias/flam-in-go/pkg/flam/health/checks"
 	healthendpoints "github.com/cjdias/flam-in-go/pkg/flam/health/endpoints"
+	"github.com/cjdias/flam-in-go/pkg/flam/jobs"
+	"github.com/cjdias/flam-in-go/pkg/flam/lock"
+	"github.com/cjdias/flam-in-go/pkg/flam/lock/lockers"
+	"github.com/cjdias/flam-in-go/pkg/flam/log/slogbridge"
 	"github.com/cjdias/flam-in-go/pkg/flam/metrics"
 	metricsdatabase "github.com/cjdias/flam-in-go/pkg/flam/metrics/collectors/database"
 	metricsredis "github.com/cjdias/flam-in-go/pkg/flam/metrics/collectors/redis"
@@ -25,12 +33,18 @@ import (
 	metricsmiddleware "github.com/cjdias/flam-in-go/pkg/flam/metrics/middleware"
 	"github.com/cjdias/flam-in-go/pkg/flam/migration"
 	migrationloggers "github.com/cjdias/flam-in-go/pkg/flam/migration/loggers"
+	"github.com/cjdias/flam-in-go/pkg/flam/mongo"
+	mongoconnections "github.com/cjdias/flam-in-go/pkg/flam/mongo/connections"
+	"github.com/cjdias/flam-in-go/pkg/flam/outbox"
 	"github.com/cjdias/flam-in-go/pkg/flam/redis"
 	redisconnections "github.com/cjdias/flam-in-go/pkg/flam/redis/connections"
 	"github.com/cjdias/flam-in-go/pkg/flam/rest"
+	"github.com/cjdias/flam-in-go/pkg/flam/rest/logcontext"
 	restloggers "github.com/cjdias/flam-in-go/pkg/flam/rest/loggers"
 	restmiddlewares "github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares"
+	"github.com/cjdias/flam-in-go/pkg/flam/rest/openapi"
 	restservers "github.com/cjdias/flam-in-go/pkg/flam/rest/servers"
+	"github.com/cjdias/flam-in-go/pkg/flam/scheduler"
 	"github.com/cjdias/flam-in-go/pkg/flam/secrets"
 	secretssource "github.com/cjdias/flam-in-go/pkg/flam/secrets/source"
 	secretsstores "github.com/cjdias/flam-in-go/pkg/flam/secrets/stores"
@@ -107,8 +121,12 @@ func (b *bundleImpl) Register(
 		QueueBundle(dialects.NewBundle()).
 		QueueBundle(migration.NewBundle()).
 		QueueBundle(migrationloggers.NewBundle()).
+		QueueBundle(mongo.NewBundle()).
+		QueueBundle(mongoconnections.NewBundle()).
 		QueueBundle(redis.NewBundle()).
 		QueueBundle(redisconnections.NewBundle()).
+		QueueBundle(lock.NewBundle()).
+		QueueBundle(lockers.NewBundle()).
 		QueueBundle(cache.NewBundle()).
 		QueueBundle(cacheserializers.NewBundle()).
 		QueueBundle(cachekeygenerators.NewBundle()).
@@ -127,6 +145,10 @@ func (b *bundleImpl) Register(
 		QueueBundle(clientclients.NewBundle()).
 		QueueBundle(broker.NewBundle()).
 		QueueBundle(brokers.NewBundle()).
+		QueueBundle(jobs.NewBundle()).
+		QueueBundle(outbox.NewBundle()).
+		QueueBundle(scheduler.NewBundle()).
+		QueueBundle(slogbridge.NewBundle()).
 		QueueBundle(tracing.NewBundle()).
 		QueueBundle(tracingexporters.NewBundle()).
 		QueueBundle(tracingdatabase.NewBundle()).
@@ -138,9 +160,15 @@ func (b *bundleImpl) Register(
 		QueueBundle(restservers.NewBundle()).
 		QueueBundle(restloggers.NewBundle()).
 		QueueBundle(restmiddlewares.NewBundle()).
+		QueueBundle(logcontext.NewBundle()).
+		QueueBundle(openapi.NewBundle()).
 		QueueBundle(tracingmiddleware.NewBundle()).
 		QueueBundle(metricsmiddleware.NewBundle()).
 		QueueBundle(metricsendpoints.NewBundle()).
+		QueueBundle(grpc.NewBundle()).
+		QueueBundle(grpcservers.NewBundle()).
+		QueueBundle(grpcloggers.NewBundle()).
+		QueueBundle(grpcinterceptors.NewBundle()).
 		QueueBundle(health.NewBundle()).
 		QueueBundle(healthchecks.NewBundle()).
 		QueueBundle(healthendpoints.NewBundle()).

@@ -150,6 +150,7 @@ func Test_StoresBundle(t *testing.T) {
 		testutil.NoError(t, a.RegisterBundle(b))
 		for _, id := range []string{
 			"flam.secrets.stores.env", "flam.secrets.stores.file", "flam.secrets.stores.vault",
+			"flam.secrets.stores.awssm", "flam.secrets.stores.gcpsm",
 		} {
 			testutil.Equal(t, id, a.HasBundle(id), true)
 		}

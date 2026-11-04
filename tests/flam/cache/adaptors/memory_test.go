@@ -531,6 +531,37 @@ func Test_MemoryAdaptor(t *testing.T) {
 			map[string]any{memory.ErrorFieldID: "main", cache.ErrorFieldKey: "adaptors.user:1"})
 	})
 
+	t.Run("should tell the keys and delete by key", func(t *testing.T) {
+		a, _ := newMemoryAdaptor(t, 10, 0)
+		keyed, ok := a.(flam.ICacheKeyedAdaptor)
+		testutil.Equal(t, "keyed", ok, true)
+		keys, err := keyed.Keys(&user{Id: 1}, &user{Id: 2})
+		testutil.NoError(t, err)
+		testutil.Equal(t, "Keys()", keys, []string{"adaptors.user:1", "adaptors.user:2"})
+		keys, err = keyed.Keys()
+		testutil.NoError(t, err)
+		testutil.Equal(t, "Keys() of none", keys, []string{})
+
+		testutil.NoError(t, a.Set(context.Background(), &user{Id: 1}, &user{Id: 2}, &user{Id: 3}))
+		testutil.NoError(t, keyed.DelKeys(context.Background(), "adaptors.user:1", "adaptors.user:3", "missing"))
+		testutil.NoError(t, keyed.DelKeys(context.Background()))
+		testutil.Equal(t, "Has()", has(t, a, 1, 2, 3), []bool{false, true, false})
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		testutil.Error(t, keyed.DelKeys(ctx, "adaptors.user:2"), cache.ErrStorage,
+			"unable to delete from memory cache: cache storage failure: context canceled",
+			map[string]any{memory.ErrorFieldID: "main"})
+		testutil.NoError(t, keyed.DelKeys(ctx))
+		testutil.Equal(t, "Has() after a failure", has(t, a, 2), []bool{true})
+
+		g, s := memoryParts(t)
+		failing, err := memory.NewAdaptor("main", failingGenerator{g}, s, testutil.NewClock(memoryNow), 10, 0)
+		testutil.NoError(t, err)
+		_, err = failing.(flam.ICacheKeyedAdaptor).Keys(&user{Id: 1}, &user{Name: "bad"})
+		testutil.Error(t, err, errBoom, "unable to get memory cache keys: boom", map[string]any{memory.ErrorFieldID: "main"})
+	})
+
 	t.Run("should be safe for concurrent use", func(t *testing.T) {
 		a, clock := newMemoryAdaptor(t, 8, time.Millisecond)
 		var wg sync.WaitGroup

@@ -1,6 +1,7 @@
 package trigger
 
 import (
+	"io"
 	"maps"
 	"slices"
 	"sync"
@@ -9,29 +10,30 @@ import (
 	"github.com/cjdias/flam-in-go/pkg/flam"
 )
 
-// newFactory returns the [flam.ITriggerFactory] reading the time from the
-// clock. It is the provider registered by the bundle returned from
-// [NewBundle].
+// newFactory returns the factory reading the time from the clock, both as
+// a [flam.ITriggerFactory] and as a [flam.ICronTriggerFactory]. It is the
+// provider registered by the bundle returned from [NewBundle].
 func newFactory(
 	clock flam.IClock,
-) flam.ITriggerFactory {
-	return &factoryImpl{
+) (flam.ITriggerFactory, flam.ICronTriggerFactory) {
+	f := &factoryImpl{
 		clock:    clock,
-		triggers: map[string]*triggerImpl{},
+		triggers: map[string]io.Closer{},
 	}
+	return f, f
 }
 
-// factoryImpl is the [flam.ITriggerFactory] returned by newFactory.
+// factoryImpl is the [flam.ICronTriggerFactory] returned by newFactory.
 type factoryImpl struct {
 	clock flam.IClock
 
 	mu       sync.Mutex
 	closed   bool
-	triggers map[string]*triggerImpl // the running ones, by id
+	triggers map[string]io.Closer // the running ones, by id
 }
 
-// compile time check that *factoryImpl implements ITriggerFactory
-var _ flam.ITriggerFactory = (*factoryImpl)(nil)
+// compile time check that *factoryImpl implements ICronTriggerFactory
+var _ flam.ICronTriggerFactory = (*factoryImpl)(nil)
 
 func (f *factoryImpl) Close() error {
 	f.mu.Lock()
@@ -64,6 +66,43 @@ func (f *factoryImpl) NewRecurring(
 	return f.create(factoryNewRecurringMessage, id, delay, callback, onError, true)
 }
 
+func (f *factoryImpl) NewCron(
+	id string,
+	schedule flam.CronSchedule,
+	callback flam.TriggerCallback,
+	onError ...flam.TriggerErrorHandler,
+) (flam.ICronTrigger, error) {
+	switch {
+	case id == "":
+		return nil, newErrInvalidID(factoryNewCronMessage)
+	case callback == nil:
+		return nil, newErrNilCallback(factoryNewCronMessage, id)
+	}
+	parsed, err := parseSchedule(f.clock, schedule)
+	if err != nil {
+		return nil, newErrInvalidSchedule(factoryNewCronMessage, id, schedule, err)
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if err := f.checkLocked(factoryNewCronMessage, id); err != nil {
+		return nil, err
+	}
+	t := newCronTrigger(cronTriggerConfig{
+		id:       id,
+		schedule: schedule,
+		parsed:   parsed,
+		callback: callback,
+		handlers: slices.Clone(onError),
+		clock:    f.clock,
+		release:  f.release,
+	})
+	f.triggers[id] = t
+	t.start()
+	return t, nil
+}
+
 // create checks the arguments and the factory state, then starts and
 // tracks a trigger.
 func (f *factoryImpl) create(
@@ -86,13 +125,9 @@ func (f *factoryImpl) create(
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	switch {
-	case f.closed:
-		return nil, newErrClosed(message, id)
-	case f.triggers[id] != nil:
-		return nil, newErrDuplicateID(message, id)
+	if err := f.checkLocked(message, id); err != nil {
+		return nil, err
 	}
-
 	t := newTrigger(triggerConfig{
 		id:        id,
 		delay:     delay,
@@ -107,15 +142,31 @@ func (f *factoryImpl) create(
 	return t, nil
 }
 
-// release stops tracking the trigger, once it stopped running.
+// checkLocked returns the error refusing a new trigger of the id, as the
+// factory is closed or a running trigger uses the id, or nil.
+func (f *factoryImpl) checkLocked(
+	message string,
+	id string,
+) error {
+	switch {
+	case f.closed:
+		return newErrClosed(message, id)
+	case f.triggers[id] != nil:
+		return newErrDuplicateID(message, id)
+	}
+	return nil
+}
+
+// release stops tracking the trigger of the id, once it stopped running.
 func (f *factoryImpl) release(
-	t *triggerImpl,
+	id string,
+	t io.Closer,
 ) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	if f.triggers[t.id] == t {
-		delete(f.triggers, t.id)
+	if f.triggers[id] == t {
+		delete(f.triggers, id)
 	}
 }
 
@@ -123,4 +174,5 @@ func (f *factoryImpl) release(
 const (
 	factoryNewPulseMessage     = "unable to create pulse trigger"
 	factoryNewRecurringMessage = "unable to create recurring trigger"
+	factoryNewCronMessage      = "unable to create cron trigger"
 )

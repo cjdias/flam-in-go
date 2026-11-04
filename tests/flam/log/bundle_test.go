@@ -39,7 +39,9 @@ func Test_Bundle(t *testing.T) {
 	t.Run("should register its providers", func(t *testing.T) {
 		app := testutil.NewApp()
 		testutil.NoError(t, log.NewBundle().Register(app))
-		testutil.Equal(t, "calls", app.Calls(), []string{"provider/0", "provider/0", "provider/0", "provider/0", "provider/0"})
+		testutil.Equal(t, "calls", app.Calls(), []string{
+			"provider/0", "provider/0", "provider/1", "provider/1", "provider/0", "provider/0",
+		})
 	})
 
 	t.Run("should register the serializer drivers", func(t *testing.T) {

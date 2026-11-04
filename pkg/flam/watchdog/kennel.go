@@ -33,10 +33,10 @@ type kennelArgs struct {
 
 // newKennel returns the kennel holding the processes of the ProcessGroup
 // group, each configured at ProcessConfigPath, added in id order, as the
-// container shuffles the group, and waiting between the restarts of a
-// process as configured at RestartDelayConfigPath and
-// RestartMaxDelayConfigPath. It is a provider registered by the bundle
-// returned from [NewBundle].
+// container shuffles the group, waiting between the restarts of a process
+// as configured at RestartDelayConfigPath and RestartMaxDelayConfigPath,
+// and draining on a signal for the delay at DrainDelayConfigPath. It is a
+// provider registered by the bundle returned from [NewBundle].
 //
 // It never fails, as the container would call it again, and so close the
 // processes again: when the delays are invalid, or at the first process
@@ -77,6 +77,7 @@ type kennel struct {
 	loggers  flam.IWatchdogLoggerAdaptorFactory
 	delay    time.Duration
 	maxDelay time.Duration
+	drain    time.Duration      // the delay of the drain on a signal
 	err      error              // the error of the creation, if any
 	ctx      context.Context    // the context of the runs, done on close
 	cancel   context.CancelFunc // cancels ctx
@@ -84,6 +85,7 @@ type kennel struct {
 	mu       sync.Mutex
 	entries  map[string]*entry
 	running  bool
+	draining bool // whether a signal started the shutdown of the run
 	closed   bool
 	reported bool // whether the error of the creation was reported
 }
@@ -197,6 +199,17 @@ func (k *kennel) IsRunning() bool {
 	return k.running
 }
 
+// IsDraining reports whether a signal received while the kennel ran its
+// processes started its shutdown: it stays true from the signal on,
+// through the drain delay and the closing of the processes, as the kennel
+// never runs again once closed.
+func (k *kennel) IsDraining() bool {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
+	return k.draining
+}
+
 // Activate fails with ErrUnknownProcess for an unknown process, and with
 // ErrRunning while the kennel runs its processes.
 func (k *kennel) Activate(
@@ -237,12 +250,17 @@ func (k *kennel) ids() []string {
 // configureDelays sets the restart delays of the kennel from the
 // configuration at RestartDelayConfigPath and RestartMaxDelayConfigPath,
 // or their defaults, the maximum default being raised to the delay when
-// shorter, failing with ErrInvalidField for a value that is not a
-// non-negative duration, or a maximum set shorter than the delay.
+// shorter, and its drain delay from the configuration at
+// DrainDelayConfigPath, or its default, failing with ErrInvalidField for
+// a value that is not a non-negative duration, or a maximum set shorter
+// than the delay.
 func (k *kennel) configureDelays(
 	config flam.IConfig,
 ) error {
 	var err error
+	if k.drain, err = configDuration(config, DrainDelayConfigPath, defaultDrainDelay); err != nil {
+		return err
+	}
 	if k.delay, err = configDuration(config, RestartDelayConfigPath, defaultRestartDelay); err != nil {
 		return err
 	}
@@ -363,9 +381,10 @@ func (k *kennel) creationErr() error {
 
 // run runs each active process under a watchdog, and waits for them to
 // end, returning their errors joined. When signals is true, the first
-// interrupt or SIGTERM signal received meanwhile closes the kennel, and
-// so its processes, the error of the closing joining theirs, while the
-// next one is handled as if the kennel had not been listening, ending
+// interrupt or SIGTERM signal received meanwhile makes the kennel drain,
+// then closes it, and so its processes, the error of the closing joining
+// theirs, while the next one cuts the drain short, and the one following
+// the drain is handled as if the kennel had not been listening, ending
 // the program, so that a process failing to end can be killed. A signal
 // the program started ignoring, such as the interrupt of a background
 // job, stays ignored. It fails with ErrClosed once the kennel is closed.
@@ -403,8 +422,10 @@ func (k *kennel) run(
 			defer close(stopped)
 			select {
 			case <-sigs:
-				signal.Stop(sigs)
-				closeErr = k.close()
+				if k.drainFor(sigs, done) {
+					signal.Stop(sigs)
+					closeErr = k.close()
+				}
 			case <-done:
 			}
 		}()
@@ -438,6 +459,32 @@ func listenedSignals() []os.Signal {
 		}
 	}
 	return listened
+}
+
+// drainFor marks the kennel draining, then waits for its drain delay, the
+// processes still running meanwhile, unless a signal is received on sigs,
+// cutting the drain short, reporting whether the kennel is to be closed:
+// false when done is closed first, as the processes all ended.
+func (k *kennel) drainFor(
+	sigs <-chan os.Signal,
+	done <-chan struct{},
+) bool {
+	k.mu.Lock()
+	k.draining = true
+	k.mu.Unlock()
+
+	if k.drain == 0 {
+		return true
+	}
+	timer := k.clock.NewTimer(k.drain)
+	defer timer.Stop()
+	select {
+	case <-timer.C():
+	case <-sigs:
+	case <-done:
+		return false
+	}
+	return true
 }
 
 // setRunning sets whether the kennel runs its processes.
@@ -532,8 +579,8 @@ func (k *kennel) isClosed() bool {
 }
 
 // close closes the kennel, cancelling the context of the runs, and every
-// process, returning the errors of the processes failing to close joined. Closing it again is a no-op
-// returning nil.
+// process, returning the errors of the processes failing to close joined.
+// Closing it again is a no-op returning nil.
 func (k *kennel) close() error {
 	k.mu.Lock()
 	if k.closed {

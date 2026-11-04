@@ -22,8 +22,10 @@ import (
 // driver: it opens them with gorm, with the dialect of the id at
 // [ConfigFieldDialect] and the gorm configuration of the id at
 // [ConfigFieldConfig], or of their defaults at [DefaultDialectConfigPath]
-// and [DefaultConfigConfigPath]. It provides no configuration nor dialect
-// driver: register it with the bundles of
+// and [DefaultConfigConfigPath], along with their read replicas and extra
+// sources, retrying as configured with the [flam.IClock] of the
+// container, only required by the connections retried. It provides no
+// configuration nor dialect driver: register it with the bundles of
 // [github.com/cjdias/flam-in-go/pkg/flam/database/configs] and
 // [github.com/cjdias/flam-in-go/pkg/flam/database/dialects].
 //

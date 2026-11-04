@@ -30,6 +30,27 @@ var (
 	// cannot be opened.
 	ErrOpen = errors.New("unable to open database connection")
 
+	// ErrResolver is the error wrapped, along with the error of gorm, by
+	// the error returned from the connection creator when the read
+	// replicas or the extra sources of the connection cannot be opened.
+	ErrResolver = errors.New("unable to open database connection replicas")
+
+	// ErrNilClock is the error wrapped by the error returned from the
+	// connection creator when the connection is to be retried without an
+	// [flam.IClock] in the container, and from [Retry] when its options
+	// have no clock.
+	ErrNilClock = errors.New("nil clock")
+
+	// ErrNilRetryFunc is the error wrapped by the error returned from
+	// [Retry] when the function to retry is nil.
+	ErrNilRetryFunc = errors.New("nil function to retry")
+
+	// ErrRetry is the error wrapped, along with the error of the last
+	// attempt, by the error returned from [Retry] when the attempts are
+	// exhausted, and, along with the error of the context, when the
+	// context ends before the next attempt.
+	ErrRetry = errors.New("unable to complete with retries")
+
 	// ErrNilDialector is the error wrapped by the error returned from
 	// [NewDialect] when the dialector is nil.
 	ErrNilDialector = errors.New("nil database dialector")
@@ -95,6 +116,27 @@ func newErrOpen(
 		With(ErrorFieldConfig, config)
 }
 
+// newErrResolver returns the error wrapping ErrResolver, joined with the
+// error of gorm, with the message and the ErrorFieldID context field.
+func newErrResolver(
+	message string,
+	id string,
+	err error,
+) *flam.Error {
+	return flam.NewWrappedError(fmt.Errorf("%w: %w", ErrResolver, err), message).
+		With(ErrorFieldID, id)
+}
+
+// newErrRetry returns the error wrapping ErrRetry, joined with the errors,
+// with the ErrorFieldAttempts context field.
+func newErrRetry(
+	attempts int,
+	errs ...error,
+) *flam.Error {
+	return flam.NewWrappedError(fmt.Errorf("%w: %w", ErrRetry, errors.Join(errs...)), retryMessage).
+		With(ErrorFieldAttempts, attempts)
+}
+
 // newErrNil returns the error wrapping the sentinel of a nil argument with
 // the message and the ErrorFieldID context field.
 func newErrNil(
@@ -116,4 +158,12 @@ func newErrClose(
 ) *flam.Error {
 	return flam.NewWrappedError(err, message).
 		With(ErrorFieldID, id)
+}
+
+// newErrRetryNil returns the error wrapping the sentinel of a nil argument
+// of Retry.
+func newErrRetryNil(
+	sentinel error,
+) *flam.Error {
+	return flam.NewWrappedError(sentinel, retryMessage)
 }

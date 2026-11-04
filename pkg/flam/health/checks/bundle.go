@@ -3,14 +3,18 @@ package checks
 import (
 	"github.com/cjdias/flam-in-go/pkg/flam"
 	"github.com/cjdias/flam-in-go/pkg/flam/bundle"
+	"github.com/cjdias/flam-in-go/pkg/flam/health/checks/broker"
 	"github.com/cjdias/flam-in-go/pkg/flam/health/checks/database"
+	"github.com/cjdias/flam-in-go/pkg/flam/health/checks/disk"
+	"github.com/cjdias/flam-in-go/pkg/flam/health/checks/http"
 	"github.com/cjdias/flam-in-go/pkg/flam/health/checks/kennel"
 	"github.com/cjdias/flam-in-go/pkg/flam/health/checks/redis"
 )
 
 // NewBundle returns the [flam.IBundle] registering the bundles of every
-// health check driver, [database.NewBundle], [redis.NewBundle] and
-// [kennel.NewBundle], to be registered along with the bundle of
+// health check driver, [database.NewBundle], [redis.NewBundle],
+// [kennel.NewBundle], [broker.NewBundle], [http.NewBundle] and
+// [disk.NewBundle], to be registered along with the bundle of
 // [github.com/cjdias/flam-in-go/pkg/flam/health.NewBundle], which
 // provides the [flam.IHealthCheckFactory]. Do not register any of the
 // driver bundles along with this one, as a bundle id can only be
@@ -38,5 +42,8 @@ func (b *bundleImpl) Register(
 		QueueBundle(database.NewBundle()).
 		QueueBundle(redis.NewBundle()).
 		QueueBundle(kennel.NewBundle()).
+		QueueBundle(broker.NewBundle()).
+		QueueBundle(http.NewBundle()).
+		QueueBundle(disk.NewBundle()).
 		Register()
 }

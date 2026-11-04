@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"go.uber.org/dig"
+
 	"github.com/cjdias/flam-in-go/pkg/flam"
 	"github.com/cjdias/flam-in-go/pkg/flam/app"
 	"github.com/cjdias/flam-in-go/pkg/flam/cache"
@@ -107,6 +109,14 @@ func Test_Bundle(t *testing.T) {
 			testutil.Equal(t, name+" closed", f.Has("bad"), false)
 		}
 		testutil.NoError(t, cache.NewBundle().(flam.IClosableBundle).Close(a))
+	})
+
+	t.Run("should fail to create the adaptor factory with a nil creator", func(t *testing.T) {
+		a := newApp(t)
+		testutil.NoError(t, a.Provide(func() flam.ICacheAdaptorCreator { return nil }, dig.Group(cache.AdaptorCreatorGroup)))
+		if err := a.Invoke(func(flam.ICacheAdaptorFactory) {}); !errors.Is(err, factory.ErrNilCreator) {
+			t.Fatalf("Invoke() = %v, want factory.ErrNilCreator", err)
+		}
 	})
 
 	t.Run("should fail to close without the factory dependencies", func(t *testing.T) {

@@ -415,3 +415,22 @@ func Test_Nats_JetStream(t *testing.T) {
 		}
 	})
 }
+
+func Test_Nats_Ping(t *testing.T) {
+	s := natsServer(t, nil)
+	b := natsBroker(t, s, container.Bag{})
+	pinger, ok := b.(flam.IHealthPinger)
+	testutil.Equal(t, "IHealthPinger", ok, true)
+
+	testutil.NoError(t, pinger.Ping(context.Background()))
+	var nilCtx context.Context
+	testutil.NoError(t, pinger.Ping(nilCtx))
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	testutil.NoError(t, pinger.Ping(ctx))
+
+	testutil.NoError(t, b.Close())
+	if err := pinger.Ping(context.Background()); err == nil {
+		t.Error("Ping() = nil, want the error of the closed connection")
+	}
+}

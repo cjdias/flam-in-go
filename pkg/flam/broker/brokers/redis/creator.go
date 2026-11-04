@@ -9,6 +9,7 @@ import (
 	"go.uber.org/dig"
 
 	"github.com/cjdias/flam-in-go/pkg/flam"
+	"github.com/cjdias/flam-in-go/pkg/flam/broker"
 	"github.com/cjdias/flam-in-go/pkg/flam/broker/brokers/internal/base"
 	"github.com/cjdias/flam-in-go/pkg/flam/factory"
 )
@@ -21,6 +22,7 @@ type creatorArgs struct {
 
 	Config      flam.IConfig
 	Connections flam.IRedisConnectionFactory `optional:"true"`
+	Telemetry   base.TelemetryArgs
 }
 
 // newCreator returns the [flam.IBrokerCreator] of the redis brokers,
@@ -29,7 +31,7 @@ type creatorArgs struct {
 func newCreator(
 	args creatorArgs,
 ) flam.IBrokerCreator {
-	return &creator{config: args.Config, connections: args.Connections}
+	return &creator{config: args.Config, connections: args.Connections, telemetry: args.Telemetry}
 }
 
 // creator is the [flam.IBrokerCreator] of the configurations with the
@@ -37,6 +39,7 @@ func newCreator(
 type creator struct {
 	config      flam.IConfig
 	connections flam.IRedisConnectionFactory
+	telemetry   base.TelemetryArgs
 }
 
 func (c *creator) Accept(
@@ -68,14 +71,18 @@ func (c *creator) Create(
 		registry:  base.NewRegistry(id),
 	}
 	r.Check(ConfigFieldBlock, b.block > 0) // a zero block waits forever
+	telemetry := r.Telemetry()
 	if field := r.Invalid(); field != "" {
 		return nil, base.NewErrInvalidField(ErrInvalidField, creatorCreateMessage, id, field)
+	}
+	var err error
+	if b.telemetry, err = base.NewTelemetry(c.telemetry, telemetry, id, messagingSystem); err != nil {
+		return nil, base.NewErr(broker.ErrRegister, creatorCreateMessage, id, err)
 	}
 	if b.group == "" {
 		b.group = id
 	}
 
-	var err error
 	if c.connections == nil {
 		err = errNoFactory
 	} else {

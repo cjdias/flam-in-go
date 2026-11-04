@@ -4,13 +4,18 @@ import (
 	"github.com/cjdias/flam-in-go/pkg/flam"
 	"github.com/cjdias/flam-in-go/pkg/flam/bundle"
 	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares/apikey"
+	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares/authz"
 	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares/bodylimit"
+	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares/compress"
 	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares/cors"
 	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares/envelope"
+	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares/etag"
+	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares/idempotency"
 	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares/jwt"
 	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares/log"
 	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares/ratelimit"
 	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares/requestid"
+	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares/secure"
 	"github.com/cjdias/flam-in-go/pkg/flam/rest/middlewares/timeout"
 )
 
@@ -43,10 +48,15 @@ func (b *bundleImpl) Register(
 		QueueBundle(log.NewBundle()).
 		QueueBundle(jwt.NewBundle()).
 		QueueBundle(apikey.NewBundle()).
+		QueueBundle(authz.NewBundle()).
 		QueueBundle(ratelimit.NewBundle()).
 		QueueBundle(requestid.NewBundle()).
 		QueueBundle(cors.NewBundle()).
 		QueueBundle(bodylimit.NewBundle()).
 		QueueBundle(timeout.NewBundle()).
+		QueueBundle(secure.NewBundle()).
+		QueueBundle(compress.NewBundle()).
+		QueueBundle(etag.NewBundle()).
+		QueueBundle(idempotency.NewBundle()).
 		Register()
 }

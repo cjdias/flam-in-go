@@ -26,6 +26,30 @@ const (
 	// StreamCreatorGroup is the container group the stream bundles provide
 	// their [flam.ILogStreamCreator] in, collected by the stream factory.
 	StreamCreatorGroup = "flam.log.streams.creator"
+
+	// ContextExtractorGroup is the container group the
+	// [flam.ILogContextExtractor] values are provided in, collected by the
+	// logger, which merges the fields they extract from the context an
+	// entry is given in into the context of the entry. The log bundle
+	// provides in it the extractor of the trace and span ids.
+	ContextExtractorGroup = "flam.log.context.extractors"
+)
+
+// Configuration paths of the fields of the trace extractor.
+const (
+	// TraceIdFieldConfigPath is the configuration path of the context
+	// field the trace extractor stores the id of the OpenTelemetry trace
+	// of the context at, as a hexadecimal string. It defaults to
+	// [ContextFieldTraceId], and an empty field leaves the id out. It is
+	// read when the logger is created.
+	TraceIdFieldConfigPath = "flam.log.context.trace_id"
+
+	// SpanIdFieldConfigPath is the configuration path of the context
+	// field the trace extractor stores the id of the OpenTelemetry span of
+	// the context at, as a hexadecimal string. It defaults to
+	// [ContextFieldSpanId], and an empty field leaves the id out. It is
+	// read when the logger is created.
+	SpanIdFieldConfigPath = "flam.log.context.span_id"
 )
 
 // Configuration paths of the log bundle behaviour.
@@ -82,6 +106,14 @@ const (
 	// serializer holding the channel of a signaled entry, over a context
 	// value of the same key.
 	ContextFieldChannel = "channel"
+
+	// ContextFieldTraceId is the default field of the id of the trace of
+	// the context of an entry, set by [TraceIdFieldConfigPath].
+	ContextFieldTraceId = "trace_id"
+
+	// ContextFieldSpanId is the default field of the id of the span of the
+	// context of an entry, set by [SpanIdFieldConfigPath].
+	ContextFieldSpanId = "span_id"
 )
 
 // Defaults of the log bundle behaviour.

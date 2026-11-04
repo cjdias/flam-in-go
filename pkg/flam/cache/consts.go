@@ -76,4 +76,12 @@ const (
 
 	// ErrorFieldKey holds the key of the object of an error.
 	ErrorFieldKey = "key"
+
+	// ErrorFieldOption holds the name of an invalid [Loader] option:
+	// "ttl", "jitter", "negative_ttl", "clock" or "key_generator".
+	ErrorFieldOption = "option"
+
+	// ErrorFieldPanic holds the value the load function of a [Loader]
+	// panicked with.
+	ErrorFieldPanic = "panic"
 )

@@ -1,12 +1,14 @@
 package middlewares
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -813,6 +815,83 @@ func Test_Log(t *testing.T) {
 		_, err := createLog(t, container.Bag{factory.ConfigFieldDriver: "other"}, nil, &entries{}, testutil.NewClock(epoch))
 		if !errors.Is(err, factory.ErrNoCreator) {
 			t.Fatalf("Get() = %v, want factory.ErrNoCreator", err)
+		}
+	})
+}
+
+// logContextKey is the key of a value of the contexts of the log tests.
+type logContextKey struct{}
+
+// logContextEntries is a flam.IContextLogger recording the entries
+// signaled with a context, along with the contexts, whose other methods
+// panic.
+type logContextEntries struct {
+	flam.IContextLogger
+
+	recorded entries
+	mu       sync.Mutex
+	ctxs     []context.Context
+}
+
+func (e *logContextEntries) SignalContext(ctx context.Context, level flam.LogLevel, channel, message string, bags ...flam.IBag) {
+	e.mu.Lock()
+	e.ctxs = append(e.ctxs, ctx)
+	e.mu.Unlock()
+	e.recorded.Signal(level, channel, message, bags...)
+}
+
+// contexts returns a copy of the contexts recorded.
+func (e *logContextEntries) contexts() []context.Context {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]context.Context(nil), e.ctxs...)
+}
+
+func Test_Log_Context(t *testing.T) {
+	t.Run("should signal with the context of the request when the logger takes one", func(t *testing.T) {
+		for _, tc := range []struct {
+			name  string
+			panic bool
+			level flam.LogLevel
+		}{
+			{"served", false, flam.LogInfo},
+			{"panicked", true, flam.LogError},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				logger := &logContextEntries{}
+				clock := testutil.NewClock(epoch)
+				m, err := createLog(t, container.Bag{}, nil, logger, clock)
+				testutil.NoError(t, err)
+				req := logRequest(http.MethodGet, "/items/1", nil)
+				ctx := rest.WithRequestId(context.WithValue(req.Context(), logContextKey{}, "v"), "req-1")
+				req = req.WithContext(ctx)
+				_, panicked := serveLog(m, logEndpoint(0), req, func(http.ResponseWriter, *http.Request) {
+					clock.Advance(1500 * time.Millisecond)
+					if tc.panic {
+						panic("boom")
+					}
+				})
+				testutil.Equal(t, "panicked", panicked != nil, tc.panic)
+
+				got := logger.recorded.all()
+				testutil.Equal(t, "count", len(got), 2)
+				request := requested(container.Bag{log.ContextFieldRequestId: "req-1"})
+				testutil.Equal(t, "request level", got[0].level, flam.LogInfo)
+				testutil.Equal(t, "request channel", got[0].channel, "flam.rest")
+				testutil.Equal(t, "request message", got[0].message, "rest request received")
+				testutil.Equal(t, "request ctx", got[0].ctx, flam.IBag(container.Bag{log.ContextFieldRequest: request}))
+				testutil.Equal(t, "response level", got[1].level, tc.level)
+				testutil.Equal(t, "response message", got[1].message, "rest response sent")
+				testutil.Equal(t, "response request", got[1].ctx.Get(log.ContextFieldRequest), any(request))
+
+				contexts := logger.contexts()
+				testutil.Equal(t, "contexts", len(contexts), 2)
+				for _, c := range contexts {
+					testutil.Equal(t, "value", c.Value(logContextKey{}), any("v"))
+					id, _ := rest.RequestIdOf(c)
+					testutil.Equal(t, "request id", id, "req-1")
+				}
+			})
 		}
 	})
 }

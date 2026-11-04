@@ -94,22 +94,26 @@ need on `app.New` to keep the binary small.
 
 | Feature | Package | Drivers |
 |---|---|---|
-| Configuration, observable and reloadable | [`config`](pkg/flam/config) | sources: env, file, dir, rest; parsers: json, yaml |
-| Logging | [`log`](pkg/flam/log) | streams: console, file, rotating file, syslog, OTLP; serializers: json, stringify |
-| Clock and triggers | [`clock`](pkg/flam/clock), [`trigger`](pkg/flam/trigger) | |
+| Configuration, observable and reloadable | [`config`](pkg/flam/config) | sources: env, file, dir, rest, Consul, etcd; parsers: json, yaml |
+| Logging, context-aware, with a `log/slog` bridge | [`log`](pkg/flam/log), [`slogbridge`](pkg/flam/log/slogbridge) | streams: console, file, rotating file, syslog, OTLP; serializers: json, stringify; trace, request and principal ids from the context |
+| Clock, triggers and cron | [`clock`](pkg/flam/clock), [`trigger`](pkg/flam/trigger), [`scheduler`](pkg/flam/scheduler) | cron specs with time zones; scheduled jobs, optionally single across instances |
 | Disks (`afero.Fs`) | [`disk`](pkg/flam/disk) | local, memory, S3, GCS |
 | In-process pub/sub | [`pubsub`](pkg/flam/pubsub) | |
-| Databases (gorm) and migrations | [`database`](pkg/flam/database), [`migration`](pkg/flam/migration) | sqlite, mysql, postgres |
+| Databases (gorm) and migrations | [`database`](pkg/flam/database), [`migration`](pkg/flam/migration) | sqlite, mysql, postgres; read replicas, transient error retries |
+| MongoDB | [`mongo`](pkg/flam/mongo) | standard |
 | Redis | [`redis`](pkg/flam/redis) | standard, mini (miniredis, for tests) |
-| Cache | [`cache`](pkg/flam/cache) | adaptors: redis, memory |
-| Message brokers | [`broker`](pkg/flam/broker) | redis (pub/sub, streams), NATS (core, JetStream), Kafka |
+| Cache | [`cache`](pkg/flam/cache) | adaptors: redis, memory, invalidating (across instances through a broker); cache-aside `Loader` with single-flight loads |
+| Distributed locks and leader election | [`lock`](pkg/flam/lock) | redis, memory; fencing tokens |
+| Message brokers | [`broker`](pkg/flam/broker) | redis (pub/sub, streams), NATS (core, JetStream), Kafka; traced and measured |
+| Background jobs and outbox | [`jobs`](pkg/flam/jobs), [`outbox`](pkg/flam/outbox) | database queue with retries and dead letters; transactional outbox relayed to a broker |
 | Translations | [`translator`](pkg/flam/translator) | en, pt, es, fr, de |
 | Validation | [`validator`](pkg/flam/validator) | go-playground validator, envelope converter |
-| Secrets | [`secrets`](pkg/flam/secrets) | env, file, Vault; a config source reading them |
-| HTTP client with circuit breaker | [`client`](pkg/flam/client) | standard client and breaker |
-| REST servers | [`rest`](pkg/flam/rest), [`envelope`](pkg/flam/envelope) | HTTP/HTTPS server; middlewares below |
-| Long running processes | [`watchdog`](pkg/flam/watchdog) | |
-| Health probes | [`health`](pkg/flam/health) | checks: database, redis, kennel; `/health/live`, `/health/ready` |
+| Secrets | [`secrets`](pkg/flam/secrets) | env, file, Vault, AWS Secrets Manager, GCP Secret Manager; a config source reading them |
+| HTTP client with circuit breaker | [`client`](pkg/flam/client) | standard client and breaker; traced and measured |
+| REST servers | [`rest`](pkg/flam/rest), [`envelope`](pkg/flam/envelope), [`openapi`](pkg/flam/rest/openapi) | HTTP/HTTPS server; middlewares below; OpenAPI 3.1 document and Swagger UI; Server-Sent Events |
+| gRPC servers | [`grpc`](pkg/flam/grpc) | standard server with health and reflection; interceptors: recovery, log, tracing, metrics |
+| Long running processes | [`watchdog`](pkg/flam/watchdog) | graceful drain on SIGTERM (`drain_delay`) |
+| Health probes | [`health`](pkg/flam/health) | checks: database, redis, kennel (fails while draining), broker, http, disk; `/health/live`, `/health/ready` |
 | Metrics (Prometheus) | [`metrics`](pkg/flam/metrics) | REST middleware, `/metrics`, database and redis collectors |
 | Tracing (OpenTelemetry) | [`tracing`](pkg/flam/tracing) | exporters: OTLP/HTTP, none; REST middleware, gorm plugin, redis hook |
 | Command line commands | [`command`](pkg/flam/command) | `help`, `migrate` |
@@ -118,8 +122,9 @@ need on `app.New` to keep the binary small.
 
 Middlewares are configured by id and listed per server, the first being the
 outermost. The recommended order is
-`requestid, cors, log, envelope, jwt|apikey, ratelimit, bodylimit, timeout`,
-with `tracing` and `metrics` near the outside.
+`requestid, cors, secure, etag, compress, log, envelope, jwt|apikey, authz, ratelimit, idempotency, bodylimit, timeout`,
+with `tracing` and `metrics` near the outside. Endpoints marked `Streaming`
+bypass the buffering middlewares.
 
 | Middleware | Purpose |
 |---|---|
@@ -127,7 +132,11 @@ with `tracing` and `metrics` near the outside.
 | `cors` | CORS headers and preflight answers |
 | `log` | logs requests and responses, redacting headers and query parameters |
 | `envelope` | answers panics with envelope errors |
-| `jwt`, `apikey` | authentication, setting the principal of the request |
+| `secure` | security headers, such as HSTS and `X-Content-Type-Options` |
+| `etag`, `compress` | ETags with 304 answers, and gzip/deflate compression |
+| `jwt`, `apikey` | authentication, setting the principal of the request; JWT keys from a JWKS or OIDC discovery |
+| `authz` | scopes and roles required per endpoint |
+| `idempotency` | replays the response of a repeated `Idempotency-Key` |
 | `ratelimit` | token bucket per principal or client IP |
 | `bodylimit` | caps the size of the request bodies |
 | `timeout` | answers a 503 when a handler runs too long |

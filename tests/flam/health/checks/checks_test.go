@@ -100,12 +100,15 @@ func Test_Bundle(t *testing.T) {
 	testutil.Equal(t, "Id()", b.Id(), "flam.health.checks")
 
 	a := newApp(t, nil, b)
-	testutil.Equal(t, "calls", a.Calls()[len(a.Calls())-8:], []string{
+	testutil.Equal(t, "calls", a.Calls()[len(a.Calls())-14:], []string{
 		"bundle:flam.health.checks",
 		"bundle:flam.health.checks.database", "provider/1",
 		"bundle:flam.health.checks.redis", "provider/1",
 		"bundle:flam.health.checks.kennel", "provider/1",
+		"bundle:flam.health.checks.broker", "provider/1",
+		"bundle:flam.health.checks.http", "provider/1",
+		"bundle:flam.health.checks.disk", "provider/1",
 		"invoker/0",
 	})
-	testutil.Equal(t, "creators", len(creators(t, a)), 3)
+	testutil.Equal(t, "creators", len(creators(t, a)), 6)
 }

@@ -30,10 +30,15 @@ type natsBroker struct {
 	ackWait    time.Duration
 	maxDeliver int
 	registry   *base.Registry
+	telemetry  *base.Telemetry
 }
 
-// compile time check that *natsBroker implements IBroker
-var _ flam.IBroker = (*natsBroker)(nil)
+// compile time checks that *natsBroker implements IBroker and
+// IHealthPinger
+var (
+	_ flam.IBroker       = (*natsBroker)(nil)
+	_ flam.IHealthPinger = (*natsBroker)(nil)
+)
 
 func (b *natsBroker) Id() string {
 	return b.id
@@ -41,7 +46,7 @@ func (b *natsBroker) Id() string {
 
 // Publish publishes the message on the subject of the topic, returning
 // once the client buffered it with core NATS, or once the stream stored
-// it with JetStream.
+// it with JetStream, traced and measured by the telemetry of the broker.
 func (b *natsBroker) Publish(
 	ctx context.Context,
 	topic string,
@@ -51,21 +56,22 @@ func (b *natsBroker) Publish(
 	if err := b.registry.CheckPublish(brokerPublishMessage, topic); err != nil {
 		return err
 	}
-
-	msg := &natsgo.Msg{Subject: topic, Data: payload, Header: natsgo.Header{}}
-	for name, value := range headers {
-		msg.Header.Set(name, value)
-	}
-	var err error
-	if b.jetStream {
-		_, err = b.js.PublishMsg(ctx, msg)
-	} else {
-		err = b.conn.PublishMsg(msg)
-	}
-	if err != nil {
-		return base.NewErrTopic(broker.ErrPublish, brokerPublishMessage, b.id, topic, err)
-	}
-	return nil
+	return b.telemetry.Publish(ctx, topic, headers, func(ctx context.Context, headers map[string]string) error {
+		msg := &natsgo.Msg{Subject: topic, Data: payload, Header: natsgo.Header{}}
+		for name, value := range headers {
+			msg.Header.Set(name, value)
+		}
+		var err error
+		if b.jetStream {
+			_, err = b.js.PublishMsg(ctx, msg)
+		} else {
+			err = b.conn.PublishMsg(msg)
+		}
+		if err != nil {
+			return base.NewErrTopic(broker.ErrPublish, brokerPublishMessage, b.id, topic, err)
+		}
+		return nil
+	})
 }
 
 // Subscribe subscribes to the subject of the topic, which may hold
@@ -86,6 +92,27 @@ func (b *natsBroker) Subscribe(
 	}
 	return b.subscribe(sub, handler)
 }
+
+// Ping flushes the connection of the broker, waiting for the server to
+// answer, for the health checks, within pingTimeout when the context has
+// no deadline, a nil context being the background one.
+func (b *natsBroker) Ping(
+	ctx context.Context,
+) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, pingTimeout)
+		defer cancel()
+	}
+	return b.conn.FlushWithContext(ctx)
+}
+
+// pingTimeout is the time a Ping given a context without deadline waits
+// for the server.
+const pingTimeout = 5 * time.Second
 
 // Close closes the subscriptions of the broker, then its connection.
 func (b *natsBroker) Close() error {
@@ -114,7 +141,7 @@ func (b *natsBroker) subscribe(
 		handling.Lock()
 		defer handling.Unlock()
 		if ctx.Err() == nil {
-			_ = base.Handle(ctx, b.id, handler, message("", m.Subject, m.Data, m.Header))
+			_ = b.telemetry.Handle(ctx, sub.Topic(), handler, message("", m.Subject, m.Data, m.Header))
 		}
 	}
 
@@ -164,7 +191,7 @@ func (b *natsBroker) consume(
 		if metadata, err := m.Metadata(); err == nil {
 			id = strconv.FormatUint(metadata.Sequence.Stream, 10)
 		}
-		if ctx.Err() == nil && base.Handle(ctx, b.id, handler, message(id, m.Subject(), m.Data(), m.Headers())) == nil {
+		if ctx.Err() == nil && b.telemetry.Handle(ctx, sub.Topic(), handler, message(id, m.Subject(), m.Data(), m.Headers())) == nil {
 			_ = m.Ack() // unacknowledged, it is delivered again after the ack wait
 			return
 		}

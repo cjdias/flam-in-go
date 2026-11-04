@@ -5,6 +5,7 @@ import (
 	"go.uber.org/dig"
 
 	"github.com/cjdias/flam-in-go/pkg/flam"
+	"github.com/cjdias/flam-in-go/pkg/flam/broker"
 	"github.com/cjdias/flam-in-go/pkg/flam/broker/brokers/internal/base"
 	"github.com/cjdias/flam-in-go/pkg/flam/factory"
 )
@@ -14,8 +15,9 @@ import (
 type creatorArgs struct {
 	dig.In
 
-	Config flam.IConfig
-	Client flam.IBrokerKafkaClient `optional:"true"`
+	Config    flam.IConfig
+	Client    flam.IBrokerKafkaClient `optional:"true"`
+	Telemetry base.TelemetryArgs
 }
 
 // newCreator returns the [flam.IBrokerCreator] of the Kafka brokers,
@@ -25,7 +27,7 @@ type creatorArgs struct {
 func newCreator(
 	args creatorArgs,
 ) flam.IBrokerCreator {
-	c := &creator{config: args.Config, client: args.Client}
+	c := &creator{config: args.Config, client: args.Client, telemetry: args.Telemetry}
 	if c.client == nil {
 		c.client = client{}
 	}
@@ -35,8 +37,9 @@ func newCreator(
 // creator is the [flam.IBrokerCreator] of the configurations with the
 // [Driver] driver.
 type creator struct {
-	config flam.IConfig
-	client flam.IBrokerKafkaClient
+	config    flam.IConfig
+	client    flam.IBrokerKafkaClient
+	telemetry base.TelemetryArgs
 }
 
 func (c *creator) Accept(
@@ -71,8 +74,13 @@ func (c *creator) Create(
 	commitInterval := r.Duration(ConfigFieldCommitInterval, "", 0)
 	retryBackoff := r.Duration(ConfigFieldRetryBackoff, DefaultRetryBackoffConfigPath, defaultRetryBackoff)
 	r.Check(ConfigFieldRetryBackoff, retryBackoff > 0) // a zero backoff retries a failing handler in a busy loop
+	telemetry := r.Telemetry()
 	if field := r.Invalid(); field != "" {
 		return nil, base.NewErrInvalidField(ErrInvalidField, creatorCreateMessage, id, field)
+	}
+	tel, err := base.NewTelemetry(c.telemetry, telemetry, id, messagingSystem)
+	if err != nil {
+		return nil, base.NewErr(broker.ErrRegister, creatorCreateMessage, id, err)
 	}
 
 	writer := &kafkago.Writer{
@@ -102,6 +110,7 @@ func (c *creator) Create(
 		},
 		retryBackoff: retryBackoff,
 		registry:     base.NewRegistry(id),
+		telemetry:    tel,
 	}, nil
 }
 

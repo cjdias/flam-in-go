@@ -12,14 +12,22 @@ var (
 	// creator when a field of the client configuration, or its default,
 	// does not hold a value of the expected type: an absolute base URL,
 	// unless empty, a bag of string headers, a breaker string, a
-	// non-negative number of retries, non-negative durations and a maximum
-	// retry delay not shorter than the retry delay.
+	// non-negative number of retries, non-negative durations, a maximum
+	// retry delay not shorter than the retry delay, tracing and metrics
+	// bools and a namespace string.
 	ErrInvalidField = errors.New("invalid standard client field")
 
 	// ErrBreaker is the error wrapped, along with the error of the
 	// [flam.IClientCircuitBreakerFactory], by the error returned from the
 	// creator when the circuit breaker cannot be taken from the factory.
 	ErrBreaker = errors.New("unable to get standard client circuit breaker")
+
+	// ErrRegister is the error wrapped, along with the error of the
+	// Prometheus registerer, by the error returned from the creator when
+	// the metrics of the client cannot be registered, such as when its
+	// namespace is not a valid metric name, or when other metrics of the
+	// same names are registered.
+	ErrRegister = errors.New("unable to register standard client metrics")
 
 	// ErrInvalidRequest is the error wrapped by the error returned from Do
 	// when the request, or its URL, is nil, or its URL is not absolute

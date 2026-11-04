@@ -20,6 +20,14 @@
 // responses are only sent once the handler returns, their flushes doing
 // nothing, and the informational statuses, such as 103, are dropped.
 //
+// The middleware passes the requests of a streaming endpoint, one whose
+// [github.com/cjdias/flam-in-go/pkg/flam.RestEndpoint] Streaming field is
+// set, such as one sending Server-Sent Events with
+// [github.com/cjdias/flam-in-go/pkg/flam/rest.NewEventStream], or taking
+// its connection over for a WebSocket, through as they are: their
+// handlers are neither bounded by the timeout nor buffered, and should
+// end once the context of their request is done.
+//
 // A panic of the handler before the context is done goes on in the
 // goroutine serving the request, so that the middlewares listed before
 // this one, such as the envelope middleware of

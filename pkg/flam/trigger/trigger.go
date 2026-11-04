@@ -1,6 +1,7 @@
 package trigger
 
 import (
+	"io"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -18,7 +19,7 @@ type triggerConfig struct {
 	handlers  []flam.TriggerErrorHandler
 	recurring bool
 	clock     flam.IClock
-	release   func(t *triggerImpl) // called once the trigger stops running
+	release   func(id string, t io.Closer) // called once the trigger stops running
 }
 
 // triggerImpl is the [flam.ITrigger] created by the factory: a goroutine
@@ -77,7 +78,7 @@ func (t *triggerImpl) Close() error {
 	// stopped here too, as the goroutine stops it only once its callback
 	// under way, if any, returns
 	t.stop()
-	t.release(t)
+	t.release(t.id, t)
 	return nil
 }
 
@@ -133,7 +134,7 @@ func (t *triggerImpl) finish() {
 	t.mu.Unlock()
 
 	// released first, so that the id is free once it no longer runs
-	t.release(t)
+	t.release(t.id, t)
 	t.isRunning.Store(false)
 }
 
@@ -149,20 +150,33 @@ func (t *triggerImpl) open() bool {
 
 // fire calls the callback, and reports its failure to the handlers.
 func (t *triggerImpl) fire() {
-	if err := t.call(); err != nil {
-		for _, handler := range t.handlers {
+	fire(t.id, t.callback, t.handlers)
+}
+
+// fire calls the callback of the trigger of the id, and reports its
+// failure to the handlers.
+func fire(
+	id string,
+	callback flam.TriggerCallback,
+	handlers []flam.TriggerErrorHandler,
+) {
+	if err := call(id, callback); err != nil {
+		for _, handler := range handlers {
 			if handler != nil {
-				t.handle(handler, err)
+				handle(handler, err)
 			}
 		}
 	}
 }
 
-// call calls the callback on a goroutine of its own, so that neither a
-// panic nor a runtime.Goexit ends the trigger goroutine, and returns its
-// failure, or nil. A nil error held by a non-nil error interface is not a
-// failure.
-func (t *triggerImpl) call() (err error) {
+// call calls the callback of the trigger of the id on a goroutine of its
+// own, so that neither a panic nor a runtime.Goexit ends the trigger
+// goroutine, and returns its failure, or nil. A nil error held by a
+// non-nil error interface is not a failure.
+func call(
+	id string,
+	callback flam.TriggerCallback,
+) (err error) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -172,16 +186,16 @@ func (t *triggerImpl) call() (err error) {
 			r := recover()
 			switch {
 			case r != nil:
-				err = newErrCallbackPanic(triggerCallbackMessage, t.id, r, debug.Stack())
+				err = newErrCallbackPanic(triggerCallbackMessage, id, r, debug.Stack())
 			case !returned:
-				err = newErrCallbackExit(triggerCallbackMessage, t.id)
+				err = newErrCallbackExit(triggerCallbackMessage, id)
 			}
 		}()
 
-		result := t.callback()
+		result := callback()
 		returned = true
 		if !value.IsNil(result) {
-			err = newErrCallback(triggerCallbackMessage, t.id, result)
+			err = newErrCallback(triggerCallbackMessage, id, result)
 		}
 	}()
 	<-done
@@ -190,7 +204,7 @@ func (t *triggerImpl) call() (err error) {
 
 // handle calls the handler with the error on a goroutine of its own,
 // dropping a panic or a runtime.Goexit of the handler.
-func (t *triggerImpl) handle(
+func handle(
 	handler flam.TriggerErrorHandler,
 	err error,
 ) {

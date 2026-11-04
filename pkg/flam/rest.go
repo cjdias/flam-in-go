@@ -22,6 +22,40 @@ type RestEndpoint struct {
 	// Status is the status of the successful responses of the endpoint,
 	// such as 201, or 0 for 200.
 	Status int
+
+	// Streaming reports whether the endpoint streams its response, such as
+	// Server-Sent Events, or takes its connection over, such as a
+	// WebSocket, so that the middlewares buffering the responses, such as
+	// the timeout middleware, pass its requests through.
+	Streaming bool
+
+	// The fields below document the endpoint, such as in an OpenAPI
+	// document, their zero values leaving it undocumented.
+
+	// Summary is the short summary of what the endpoint does.
+	Summary string
+
+	// Description is the longer description of the endpoint.
+	Description string
+
+	// Tags group the endpoint with the others of the same tags.
+	Tags []string
+
+	// Params is a value, such as the zero value, of the struct the path
+	// values and the query of the requests are decoded into, its fields
+	// named by their schema tags, as with the decoder of the rest package.
+	Params any
+
+	// Request is a value, such as the zero value, of the type the JSON body
+	// of the requests is decoded into, or nil for no body.
+	Request any
+
+	// Response is a value, such as the zero value, of the type of the data
+	// of the envelope of the successful responses, or nil for no data.
+	Response any
+
+	// Deprecated reports whether the endpoint is deprecated.
+	Deprecated bool
 }
 
 // IRestRouter routes the requests of a REST server to the handlers of its
@@ -31,6 +65,14 @@ type IRestRouter interface {
 	// endpoint is invalid, or its pattern conflicts with the pattern of
 	// another endpoint.
 	Handle(endpoint RestEndpoint, handler http.Handler) error
+}
+
+// IRestEndpointLister lists the endpoints registered on a router, such as
+// to document them, as the [IRestRouter] given to the registers may do.
+type IRestEndpointLister interface {
+	// Endpoints returns the endpoints registered, in their order of
+	// registration.
+	Endpoints() []RestEndpoint
 }
 
 // IRestEndpointRegister registers endpoints on the routers of the REST

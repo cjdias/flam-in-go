@@ -455,17 +455,18 @@ func Test_Store_Get(t *testing.T) {
 
 	t.Run("should read the field of the secret of the key", func(t *testing.T) {
 		s := mustCreate(t, srv, container.Bag{vault.ConfigFieldNamespace: "team"})
-		for key, want := range map[string]string{
-			"db#password":   "s3cret",
-			"db#user":       "admin",
-			"db#port":       "5432",
-			"db#tags":       `["a"]`,
-			"db#empty":      "",
-			"app/my conf#k": "v",
+		// in order, the last key reading the secret requested last
+		for _, tc := range []struct{ key, want string }{
+			{"db#password", "s3cret"},
+			{"db#user", "admin"},
+			{"db#port", "5432"},
+			{"db#tags", `["a"]`},
+			{"db#empty", ""},
+			{"app/my conf#k", "v"},
 		} {
-			got, err := s.Get(context.Background(), key)
+			got, err := s.Get(context.Background(), tc.key)
 			testutil.NoError(t, err)
-			testutil.Equal(t, key, got, want)
+			testutil.Equal(t, tc.key, got, tc.want)
 		}
 		requests := srv.received()
 		testutil.Equal(t, "last request", requests[len(requests)-1], request{

@@ -17,7 +17,13 @@ import (
 // client fields.
 //
 // The creator takes the [flam.IClock] from the container: register the
-// clock bundle to create standard clients.
+// clock bundle to create standard clients. It also takes the
+// [go.opentelemetry.io/otel/trace.TracerProvider], the
+// [go.opentelemetry.io/otel/propagation.TextMapPropagator] and the
+// Prometheus registerer from the container, when provided, as by the
+// bundles of [github.com/cjdias/flam-in-go/pkg/flam/tracing] and
+// [github.com/cjdias/flam-in-go/pkg/flam/metrics], to trace and measure
+// the requests of the clients.
 func NewBundle() flam.IBundle {
 	return &bundleImpl{}
 }
@@ -41,6 +47,9 @@ func (b *bundleImpl) Config(
 		DefaultRetriesConfigPath:           defaultRetries,
 		DefaultRetryDelayConfigPath:        defaultRetryDelay.String(),
 		DefaultRetryMaxDelayConfigPath:     defaultRetryMaxDelay.String(),
+		DefaultTracingConfigPath:           defaultTracing,
+		DefaultMetricsConfigPath:           defaultMetrics,
+		DefaultNamespaceConfigPath:         defaultNamespace,
 	} {
 		if err := bag.Set(path, value); err != nil {
 			return err

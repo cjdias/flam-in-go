@@ -8,12 +8,16 @@ import (
 	"slices"
 	"time"
 
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/cjdias/flam-in-go/pkg/flam"
 )
 
 // httpClient is the standard [flam.IClient], sending the requests with an
 // [http.Client] of its own, under the protection of its circuit breaker,
-// when it has one.
+// when it has one, tracing each attempt with its tracer and propagator,
+// and measuring it on its metrics, when it has them.
 type httpClient struct {
 	id            string
 	baseURL       *url.URL
@@ -24,6 +28,9 @@ type httpClient struct {
 	retryMaxDelay time.Duration
 	clock         flam.IClock
 	http          *http.Client
+	tracer        trace.Tracer
+	propagator    propagation.TextMapPropagator
+	metrics       *clientMetrics
 }
 
 // compile time check that *httpClient implements IClient
@@ -39,6 +46,11 @@ func (c *httpClient) Id() string {
 // outcome to it: a failure for a 5xx response or an error, unless the
 // context of the request is done, which is ignored, and a success
 // otherwise.
+//
+// Each attempt runs within a client span of the tracer of the client, when
+// it has one, the context of the span being injected into the headers of
+// the copy sent, with the propagator, and is measured on the metrics of
+// the client, when it has them.
 //
 // A failed attempt of a request of an idempotent method whose body can be
 // sent again, as it has none or its GetBody is set, is retried, up to the
@@ -112,16 +124,32 @@ func (c *httpClient) Close() error {
 // clientDoMessage is the message of the errors returned by Do and Request.
 const clientDoMessage = "unable to do standard client request"
 
-// send sends the attempt of the request to the target URL, through the
-// circuit breaker, and returns its response or error, and whether it
-// failed in a way worth a retry: a 5xx response, or an error while the
-// context of the request is not done.
+// send sends the attempt of the request to the target URL, within its
+// span, measured, and returns its response or error, and whether it
+// failed in a way worth a retry, as transmit does.
 func (c *httpClient) send(
 	req *http.Request,
 	target *url.URL,
 	attempt int,
 ) (*http.Response, bool, error) {
-	out := req.Clone(req.Context())
+	ctx, span := c.startSpan(req, target, attempt)
+	start := c.clock.Now()
+	resp, failed, err := c.transmit(ctx, req, target, attempt)
+	c.observe(span, req.Method, start, resp, err)
+	return resp, failed, err
+}
+
+// transmit sends a copy of the request, under the context, to the target
+// URL, through the circuit breaker, and returns its response or error, and
+// whether it failed in a way worth a retry: a 5xx response, or an error
+// while the context of the request is not done.
+func (c *httpClient) transmit(
+	ctx context.Context,
+	req *http.Request,
+	target *url.URL,
+	attempt int,
+) (*http.Response, bool, error) {
+	out := req.Clone(ctx)
 	u := *target
 	out.URL = &u
 	if out.Header == nil {
@@ -131,6 +159,9 @@ func (c *httpClient) send(
 		if _, ok := out.Header[name]; !ok {
 			out.Header[name] = slices.Clone(values)
 		}
+	}
+	if c.propagator != nil {
+		c.propagator.Inject(ctx, propagation.HeaderCarrier(out.Header))
 	}
 	if attempt > 0 && req.GetBody != nil {
 		body, err := req.GetBody()

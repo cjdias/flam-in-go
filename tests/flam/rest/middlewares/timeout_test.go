@@ -235,6 +235,28 @@ func Test_Timeout(t *testing.T) {
 		}
 	})
 
+	t.Run("should pass the requests of a streaming endpoint through", func(t *testing.T) {
+		m := newTimeout(t, "1ms")
+		var deadline bool
+		var flushed bool
+		rec := httptest.NewRecorder()
+		h := m.Wrap(flam.RestEndpoint{Id: 7, Pattern: "GET /events", Streaming: true}, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			_, deadline = req.Context().Deadline()
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte("first"))
+			testutil.NoError(t, http.NewResponseController(w).Flush())
+			flushed = rec.Flushed && rec.Body.String() == "first"
+			time.Sleep(20 * time.Millisecond)
+			_, _ = w.Write([]byte(" late"))
+		}))
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/events", nil))
+
+		testutil.Equal(t, "deadline", deadline, false)
+		testutil.Equal(t, "flushed before returning", flushed, true)
+		testutil.Equal(t, "status", rec.Code, http.StatusAccepted)
+		testutil.Equal(t, "body", rec.Body.String(), "first late")
+	})
+
 	t.Run("should panic with the value the handler panicked with in time", func(t *testing.T) {
 		rec, panicked := serve(t, "/items/1", func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte("partial"))

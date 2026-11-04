@@ -6,7 +6,8 @@ import (
 )
 
 // NewBundle returns the [flam.IBundle] of the trigger feature, providing to
-// the application container a single [flam.ITriggerFactory], reading the
+// the application container a single factory, both as a
+// [flam.ITriggerFactory] and as a [flam.ICronTriggerFactory], reading the
 // time from the [flam.IClock] of the container: register the bundle of
 // [github.com/cjdias/flam-in-go/pkg/flam/clock] too, or provide another
 // IClock.

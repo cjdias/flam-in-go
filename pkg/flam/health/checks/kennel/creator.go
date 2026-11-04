@@ -63,6 +63,11 @@ func (c *creator) Create(
 		return nil, newErr(ErrInvalidField, creatorCreateMessage, id).
 			With(ErrorFieldField, ConfigFieldProcesses)
 	}
+	draining, ok := bag.Get(ConfigFieldDraining, defaultDraining).(bool)
+	if !ok {
+		return nil, newErr(ErrInvalidField, creatorCreateMessage, id).
+			With(ErrorFieldField, ConfigFieldDraining)
+	}
 	if c.kennel == nil {
 		return nil, newErr(ErrNoKennel, creatorCreateMessage, id)
 	}
@@ -78,7 +83,7 @@ func (c *creator) Create(
 	ids = slices.Sorted(slices.Values(ids))
 
 	return health.NewCheck(id, kind, func(context.Context) error {
-		return c.check(id, ids)
+		return c.check(id, ids, draining)
 	})
 }
 
@@ -88,13 +93,18 @@ const (
 	checkMessage         = "kennel health check failed"
 )
 
-// check fails with ErrNotRunning, while the kennel runs its processes,
-// when processes of the ids, active in the kennel, are not running,
-// giving their ids.
+// check fails with ErrDraining while the kennel drains, when draining,
+// and with ErrNotRunning, while the kennel runs its processes, when
+// processes of the ids, active in the kennel, are not running, giving
+// their ids.
 func (c *creator) check(
 	id string,
 	ids []string,
+	draining bool,
 ) error {
+	if draining && c.kennel.IsDraining() {
+		return newErr(ErrDraining, checkMessage, id)
+	}
 	if !c.kennel.IsRunning() {
 		return nil
 	}

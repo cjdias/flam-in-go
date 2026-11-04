@@ -6,6 +6,11 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/dig"
+
 	"github.com/cjdias/flam-in-go/pkg/flam"
 	"github.com/cjdias/flam-in-go/pkg/flam/client"
 	"github.com/cjdias/flam-in-go/pkg/flam/container"
@@ -13,29 +18,50 @@ import (
 	"github.com/cjdias/flam-in-go/pkg/flam/internal/settings"
 )
 
+// creatorArgs are the dependencies of the creator, taken from the
+// container. The tracer provider, the propagator and the registerer are
+// optional, so that the clients work without the tracing and the metrics
+// features: their absence only leaves the requests untraced, or
+// unmeasured.
+type creatorArgs struct {
+	dig.In
+
+	Config     flam.IConfig
+	Clock      flam.IClock
+	Breakers   flam.IClientCircuitBreakerFactory
+	Provider   trace.TracerProvider          `optional:"true"`
+	Propagator propagation.TextMapPropagator `optional:"true"`
+	Registerer prometheus.Registerer         `optional:"true"`
+}
+
 // newCreator returns the [flam.IClientCreator] of the standard clients,
 // reading the defaults of the missing fields from the configuration, their
-// circuit breakers from the factory, and waiting their retries with the
-// clock. It is the provider registered by the bundle returned from
-// [NewBundle].
+// circuit breakers from the factory, waiting their retries with the
+// clock, and tracing and measuring their requests with the tracer
+// provider, the propagator and the registerer, when provided. It is the
+// provider registered by the bundle returned from [NewBundle].
 func newCreator(
-	config flam.IConfig,
-	clock flam.IClock,
-	breakers flam.IClientCircuitBreakerFactory,
+	args creatorArgs,
 ) flam.IClientCreator {
 	return &creator{
-		config:   config,
-		clock:    clock,
-		breakers: breakers,
+		config:     args.Config,
+		clock:      args.Clock,
+		breakers:   args.Breakers,
+		provider:   args.Provider,
+		propagator: args.Propagator,
+		registerer: args.Registerer,
 	}
 }
 
 // creator is the [flam.IClientCreator] of the configurations with the
 // [Driver] driver.
 type creator struct {
-	config   flam.IConfig
-	clock    flam.IClock
-	breakers flam.IClientCircuitBreakerFactory
+	config     flam.IConfig
+	clock      flam.IClock
+	breakers   flam.IClientCircuitBreakerFactory
+	provider   trace.TracerProvider
+	propagator propagation.TextMapPropagator
+	registerer prometheus.Registerer
 }
 
 func (c *creator) Accept(
@@ -45,7 +71,11 @@ func (c *creator) Accept(
 }
 
 // Create returns the client of the configuration, with an HTTP transport
-// of its own, and its circuit breaker, when it has one.
+// of its own, and its circuit breaker, when it has one. Unless disabled by
+// its configuration, the client traces its requests when the container
+// provides a tracer provider and a propagator, and measures them when it
+// provides a registerer, after registering its metrics, or taking those
+// registered already by a client of the same namespace.
 func (c *creator) Create(
 	bag flam.IBag,
 ) (flam.IClient, error) {
@@ -62,6 +92,19 @@ func (c *creator) Create(
 			return nil, newErr(ErrBreaker, creatorCreateMessage, id, err).
 				With(ErrorFieldBreaker, cfg.breaker)
 		}
+	}
+
+	var metrics *clientMetrics
+	if cfg.metrics && c.registerer != nil {
+		if metrics, err = newClientMetrics(c.registerer, cfg.namespace); err != nil {
+			return nil, newErr(ErrRegister, creatorCreateMessage, id, err)
+		}
+	}
+	var tracer trace.Tracer
+	var propagator propagation.TextMapPropagator
+	if cfg.tracing && c.provider != nil && c.propagator != nil {
+		tracer = c.provider.Tracer(ScopeName)
+		propagator = c.propagator
 	}
 
 	return &httpClient{
@@ -88,6 +131,9 @@ func (c *creator) Create(
 				ExpectContinueTimeout: transportExpectContinueTimeout,
 			},
 		},
+		tracer:     tracer,
+		propagator: propagator,
+		metrics:    metrics,
 	}, nil
 }
 
@@ -103,6 +149,9 @@ type clientConfig struct {
 	retries       int
 	retryDelay    time.Duration
 	retryMaxDelay time.Duration
+	tracing       bool
+	metrics       bool
+	namespace     string
 }
 
 // read returns the configuration of the client of the id, from its fields
@@ -138,6 +187,15 @@ func (c *creator) read(
 	}
 	if cfg.retryMaxDelay, ok = settings.Duration(c.field(bag, ConfigFieldRetryMaxDelay, DefaultRetryMaxDelayConfigPath, defaultRetryMaxDelay)); !ok || cfg.retryMaxDelay < cfg.retryDelay {
 		return nil, invalid(ConfigFieldRetryMaxDelay)
+	}
+	if cfg.tracing, ok = c.field(bag, ConfigFieldTracing, DefaultTracingConfigPath, defaultTracing).(bool); !ok {
+		return nil, invalid(ConfigFieldTracing)
+	}
+	if cfg.metrics, ok = c.field(bag, ConfigFieldMetrics, DefaultMetricsConfigPath, defaultMetrics).(bool); !ok {
+		return nil, invalid(ConfigFieldMetrics)
+	}
+	if cfg.namespace, ok = c.field(bag, ConfigFieldNamespace, DefaultNamespaceConfigPath, defaultNamespace).(string); !ok {
+		return nil, invalid(ConfigFieldNamespace)
 	}
 	return cfg, nil
 }

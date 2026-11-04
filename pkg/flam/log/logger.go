@@ -1,34 +1,52 @@
 package log
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"time"
+
+	"go.uber.org/dig"
 
 	"github.com/cjdias/flam-in-go/pkg/flam"
 	"github.com/cjdias/flam-in-go/pkg/flam/container"
 	"github.com/cjdias/flam-in-go/pkg/flam/internal/value"
 )
 
-// newLogger returns the logger stamping its entries with the clock and
-// writing them, when flushed, to the streams stored in the stream factory.
-// It is a provider registered by the bundle returned from [NewBundle].
+// loggerArgs are the dependencies of the logger, taken from the
+// container. The group tag repeats ContextExtractorGroup, as a struct tag
+// cannot use a constant.
+type loggerArgs struct {
+	dig.In
+
+	Clock      flam.IClock
+	Streams    flam.ILogStreamFactory
+	Extractors []flam.ILogContextExtractor `group:"flam.log.context.extractors"`
+}
+
+// newLogger returns the logger stamping its entries with the clock,
+// adding to the entries given with a context the fields the extractors
+// extract from it, and writing them, when flushed, to the streams stored
+// in the stream factory. It is a provider registered by the bundle
+// returned from [NewBundle], as both the [flam.ILogger] and the
+// [flam.IContextLogger] of the container.
 func newLogger(
-	clock flam.IClock,
-	streams flam.ILogStreamFactory,
-) flam.ILogger {
+	args loggerArgs,
+) *logger {
 	return &logger{
-		clock:   clock,
-		streams: streams,
+		clock:      args.Clock,
+		streams:    args.Streams,
+		extractors: args.Extractors,
 	}
 }
 
-// logger is the [flam.ILogger] provided by the bundle: it keeps its entries
-// until flushed, then writes each of them to every stream stored in the
-// stream factory, in stream id order.
+// logger is the [flam.IContextLogger] provided by the bundle: it keeps its
+// entries until flushed, then writes each of them to every stream stored
+// in the stream factory, in stream id order.
 type logger struct {
-	clock   flam.IClock
-	streams flam.ILogStreamFactory
+	clock      flam.IClock
+	streams    flam.ILogStreamFactory
+	extractors []flam.ILogContextExtractor
 
 	mu      sync.Mutex // guards entries
 	entries []logEntry
@@ -47,8 +65,8 @@ type logEntry struct {
 	ctx       []flam.IBag
 }
 
-// compile time check that *logger implements ILogger
-var _ flam.ILogger = (*logger)(nil)
+// compile time check that *logger implements IContextLogger
+var _ flam.IContextLogger = (*logger)(nil)
 
 func (l *logger) Signal(
 	level flam.LogLevel,
@@ -114,6 +132,72 @@ func (l *logger) BroadcastDebug(message string, ctx ...flam.IBag) {
 	l.Broadcast(flam.LogDebug, message, ctx...)
 }
 
+func (l *logger) SignalContext(
+	ctx context.Context,
+	level flam.LogLevel,
+	channel, message string,
+	bags ...flam.IBag,
+) {
+	l.Signal(level, channel, message, l.extract(ctx, bags)...)
+}
+
+func (l *logger) SignalFatalContext(ctx context.Context, channel, message string, bags ...flam.IBag) {
+	l.SignalContext(ctx, flam.LogFatal, channel, message, bags...)
+}
+
+func (l *logger) SignalErrorContext(ctx context.Context, channel, message string, bags ...flam.IBag) {
+	l.SignalContext(ctx, flam.LogError, channel, message, bags...)
+}
+
+func (l *logger) SignalWarningContext(ctx context.Context, channel, message string, bags ...flam.IBag) {
+	l.SignalContext(ctx, flam.LogWarning, channel, message, bags...)
+}
+
+func (l *logger) SignalNoticeContext(ctx context.Context, channel, message string, bags ...flam.IBag) {
+	l.SignalContext(ctx, flam.LogNotice, channel, message, bags...)
+}
+
+func (l *logger) SignalInfoContext(ctx context.Context, channel, message string, bags ...flam.IBag) {
+	l.SignalContext(ctx, flam.LogInfo, channel, message, bags...)
+}
+
+func (l *logger) SignalDebugContext(ctx context.Context, channel, message string, bags ...flam.IBag) {
+	l.SignalContext(ctx, flam.LogDebug, channel, message, bags...)
+}
+
+func (l *logger) BroadcastContext(
+	ctx context.Context,
+	level flam.LogLevel,
+	message string,
+	bags ...flam.IBag,
+) {
+	l.Broadcast(level, message, l.extract(ctx, bags)...)
+}
+
+func (l *logger) BroadcastFatalContext(ctx context.Context, message string, bags ...flam.IBag) {
+	l.BroadcastContext(ctx, flam.LogFatal, message, bags...)
+}
+
+func (l *logger) BroadcastErrorContext(ctx context.Context, message string, bags ...flam.IBag) {
+	l.BroadcastContext(ctx, flam.LogError, message, bags...)
+}
+
+func (l *logger) BroadcastWarningContext(ctx context.Context, message string, bags ...flam.IBag) {
+	l.BroadcastContext(ctx, flam.LogWarning, message, bags...)
+}
+
+func (l *logger) BroadcastNoticeContext(ctx context.Context, message string, bags ...flam.IBag) {
+	l.BroadcastContext(ctx, flam.LogNotice, message, bags...)
+}
+
+func (l *logger) BroadcastInfoContext(ctx context.Context, message string, bags ...flam.IBag) {
+	l.BroadcastContext(ctx, flam.LogInfo, message, bags...)
+}
+
+func (l *logger) BroadcastDebugContext(ctx context.Context, message string, bags ...flam.IBag) {
+	l.BroadcastContext(ctx, flam.LogDebug, message, bags...)
+}
+
 func (l *logger) Flush() error {
 	l.flushMu.Lock()
 	defer l.flushMu.Unlock()
@@ -177,6 +261,23 @@ func (l *logger) add(
 	defer l.mu.Unlock()
 	entry.timestamp = l.clock.Now()
 	l.entries = append(l.entries, entry)
+}
+
+// extract returns the fields the extractors extract from the context,
+// followed by the bags, so that, once merged by add, the bags win over
+// the extracted fields. A nil context carries no field.
+func (l *logger) extract(
+	ctx context.Context,
+	bags []flam.IBag,
+) []flam.IBag {
+	if ctx == nil || len(l.extractors) == 0 {
+		return bags
+	}
+	all := make([]flam.IBag, 0, len(l.extractors)+len(bags))
+	for _, extractor := range l.extractors {
+		all = append(all, extractor.Extract(ctx))
+	}
+	return append(all, bags...)
 }
 
 // write writes the entry to the stream, as a broadcast or on its channel.

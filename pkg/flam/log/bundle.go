@@ -3,12 +3,15 @@ package log
 import (
 	"errors"
 
+	"go.uber.org/dig"
+
 	"github.com/cjdias/flam-in-go/pkg/flam"
 	"github.com/cjdias/flam-in-go/pkg/flam/bundle"
 )
 
 // NewBundle returns the [flam.IBundle] of the log feature, providing to
-// the application container a single [flam.ILogger], and the
+// the application container a single logger, as both its [flam.ILogger]
+// and its [flam.IContextLogger], and the
 // [flam.ILogSerializerFactory] and the [flam.ILogStreamFactory], created
 // on first use from the configuration at [SerializerConfigPath] and
 // [StreamConfigPath] and the creators of the [SerializerCreatorGroup] and
@@ -20,6 +23,15 @@ import (
 // The logger stamps its entries with the [flam.IClock] of the container
 // and keeps them until flushed, then writes each of them to every stream
 // stored in the stream factory, which filters them by level and channel.
+// To the entries given with a context, it adds the fields extracted from
+// it by the [flam.ILogContextExtractor] values of the
+// [ContextExtractorGroup] group, the contexts given along winning over
+// them, while the winner between extractors setting the same field is
+// unspecified, as the container does not order its groups. The
+// bundle provides in the group the extractor of the ids of the
+// OpenTelemetry trace and span of the context, at the fields read from
+// [TraceIdFieldConfigPath] and [SpanIdFieldConfigPath] when the logger is
+// created.
 //
 // The bundle implements [flam.IBootableBundle]: when the application
 // boots, it creates every stream configured at [StreamConfigPath], in id
@@ -69,7 +81,8 @@ func (b *bundleImpl) Register(
 	return bundle.NewRegisterer(app).
 		QueueProvider(newSerializerFactory).
 		QueueProvider(newStreamFactory).
-		QueueProvider(newLogger).
+		QueueProvider(newLogger, dig.As(new(flam.ILogger), new(flam.IContextLogger))).
+		QueueProvider(newTraceExtractor, dig.Group(ContextExtractorGroup)).
 		QueueProvider(newBooter).
 		QueueProvider(newFlusher).
 		Register()

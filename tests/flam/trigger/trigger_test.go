@@ -120,14 +120,15 @@ func asFlamError(t *testing.T, err error) *flam.Error {
 func Test_Declarations(t *testing.T) {
 	t.Run("should have the documented sentinel messages", func(t *testing.T) {
 		for err, text := range map[error]string{
-			trigger.ErrInvalidID:     "invalid trigger id",
-			trigger.ErrNilCallback:   "nil trigger callback",
-			trigger.ErrInvalidDelay:  "invalid trigger delay",
-			trigger.ErrClosed:        "trigger factory closed",
-			trigger.ErrDuplicateID:   "trigger id already in use",
-			trigger.ErrCallback:      "trigger callback failed",
-			trigger.ErrCallbackPanic: "trigger callback panicked",
-			trigger.ErrCallbackExit:  "trigger callback exited",
+			trigger.ErrInvalidID:       "invalid trigger id",
+			trigger.ErrNilCallback:     "nil trigger callback",
+			trigger.ErrInvalidDelay:    "invalid trigger delay",
+			trigger.ErrInvalidSchedule: "invalid trigger schedule",
+			trigger.ErrClosed:          "trigger factory closed",
+			trigger.ErrDuplicateID:     "trigger id already in use",
+			trigger.ErrCallback:        "trigger callback failed",
+			trigger.ErrCallbackPanic:   "trigger callback panicked",
+			trigger.ErrCallbackExit:    "trigger callback exited",
 		} {
 			testutil.Equal(t, "sentinel", err.Error(), text)
 			testutil.Equal(t, "unwrap", errors.Unwrap(err), nil)
@@ -137,6 +138,7 @@ func Test_Declarations(t *testing.T) {
 	t.Run("should have the documented context fields", func(t *testing.T) {
 		testutil.Equal(t, "ErrorFieldID", trigger.ErrorFieldID, "id")
 		testutil.Equal(t, "ErrorFieldDelay", trigger.ErrorFieldDelay, "delay")
+		testutil.Equal(t, "ErrorFieldSchedule", trigger.ErrorFieldSchedule, "schedule")
 		testutil.Equal(t, "ErrorFieldPanic", trigger.ErrorFieldPanic, "panic")
 		testutil.Equal(t, "ErrorFieldStack", trigger.ErrorFieldStack, "stack")
 	})
@@ -166,6 +168,11 @@ func Test_Bundle(t *testing.T) {
 		testutil.NoError(t, app.Invoke(func(f flam.ITriggerFactory) { second = f }))
 		if first == nil || first != second {
 			t.Fatal("the container did not provide a single ITriggerFactory")
+		}
+		var cronFactory flam.ICronTriggerFactory
+		testutil.NoError(t, app.Invoke(func(f flam.ICronTriggerFactory) { cronFactory = f }))
+		if !testutil.SamePointer(cronFactory, first) {
+			t.Fatal("the container did not provide the ITriggerFactory as the ICronTriggerFactory")
 		}
 	})
 

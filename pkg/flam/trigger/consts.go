@@ -4,7 +4,7 @@ package trigger
 const bundleId = "flam.trigger"
 
 // Context fields of the [*flam.Error] values returned by the
-// [flam.ITriggerFactory] methods and passed to the
+// [flam.ICronTriggerFactory] methods and passed to the
 // [flam.TriggerErrorHandler] values.
 const (
 	// ErrorFieldID holds the id of the trigger.
@@ -13,6 +13,10 @@ const (
 	// ErrorFieldDelay holds the delay given to the creation method, with
 	// [ErrInvalidDelay].
 	ErrorFieldDelay = "delay"
+
+	// ErrorFieldSchedule holds the [flam.CronSchedule] given to
+	// [flam.ICronTriggerFactory.NewCron], with [ErrInvalidSchedule].
+	ErrorFieldSchedule = "schedule"
 
 	// ErrorFieldPanic holds the value the callback panicked with, with
 	// [ErrCallbackPanic].

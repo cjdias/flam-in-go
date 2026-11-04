@@ -2,6 +2,7 @@ package log
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -54,8 +55,9 @@ func (m *middleware) Wrap(
 		expected = http.StatusOK
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		ctx := req.Context()
 		request := m.request(endpoint, req)
-		m.logger.Signal(m.levelRequest, m.channel, middlewareRequestMessage, container.Bag{
+		m.log(ctx, m.levelRequest, middlewareRequestMessage, container.Bag{
 			ContextFieldRequest: request,
 		})
 
@@ -68,7 +70,7 @@ func (m *middleware) Wrap(
 		start := m.clock.Now()
 		panicked := true
 		defer func() {
-			m.signal(request, rw, tee, expected, m.clock.Since(start), panicked)
+			m.signal(ctx, request, rw, tee, expected, m.clock.Since(start), panicked)
 		}()
 		next.ServeHTTP(rw, req)
 		panicked = false
@@ -173,12 +175,13 @@ func (m *middleware) headers(
 	return headers
 }
 
-// signal signals the response to the request, at the error level for a
+// signal signals, with the context of the request, the response to it, at the error level for a
 // response of a 5xx status or a handler that panicked, and at the
 // response level otherwise, on the channel, with the body kept by the tee
 // writer, when not nil, when the status is not the expected one, as the
 // tee writer then kept it.
 func (m *middleware) signal(
+	ctx context.Context,
 	request container.Bag,
 	w flam.IRestResponseWriter,
 	tee *writer,
@@ -198,19 +201,35 @@ func (m *middleware) signal(
 	if tee != nil && status != expected {
 		m.body(response, tee.body.Bytes(), tee.truncated, middlewareJSON(w.Header(), middlewareResponseJSONTypes))
 	}
-	ctx := container.Bag{
+	fields := container.Bag{
 		ContextFieldRequest:  request,
 		ContextFieldResponse: response,
 		ContextFieldDuration: duration,
 	}
 	level := m.levelResponse
 	if panicked {
-		ctx[ContextFieldPanicked] = true
+		fields[ContextFieldPanicked] = true
 	}
 	if panicked || status >= http.StatusInternalServerError {
 		level = m.levelError
 	}
-	m.logger.Signal(level, m.channel, middlewareResponseMessage, ctx)
+	m.log(ctx, level, middlewareResponseMessage, fields)
+}
+
+// log signals the entry on the channel, with the context of the request
+// when the logger is a [flam.IContextLogger], so that the entry holds the
+// fields its extractors extract from it.
+func (m *middleware) log(
+	ctx context.Context,
+	level flam.LogLevel,
+	message string,
+	fields container.Bag,
+) {
+	if logger, ok := m.logger.(flam.IContextLogger); ok {
+		logger.SignalContext(ctx, level, m.channel, message, fields)
+		return
+	}
+	m.logger.Signal(level, m.channel, message, fields)
 }
 
 // middlewareValues returns the value of a header or a query parameter, or

@@ -12,6 +12,10 @@ const bundleId = "flam.broker.brokers.kafka"
 // of their configuration.
 const Driver = "flam.broker.brokers.driver.kafka"
 
+// messagingSystem is the messaging system of the spans of the brokers,
+// held by their "messaging.system" attribute.
+const messagingSystem = "kafka"
+
 // HeaderKey is the header holding the key of a Kafka message: given to
 // Publish, it becomes the key of the message, which the hash balancer
 // sends to the partition of the key, and not a header of it, and a

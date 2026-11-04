@@ -16,5 +16,15 @@
 // The authentication drivers of the jwt and apikey sub packages set the
 // principal of the requests, by which the ratelimit one tells the
 // clients, falling back to their IP: list them before ratelimit, so that
-// it limits each client rather than each address.
+// it limits each client rather than each address. The authz driver
+// authorizes the requests by their claims and principal: list it after
+// them too.//
+// The secure driver sets the security headers of the responses: list it
+// early, so that the answers of the middlewares after it hold them too.
+// The etag and compress drivers buffer the responses: list etag before
+// compress, so that it tags the compressed bodies, and compress before
+// log, so that the bodies logged are readable. The idempotency driver
+// replays the responses to the repeated requests: list it after the
+// authentication drivers, as it scopes the keys by principal, and after
+// bodylimit, as it reads the bodies whole.
 package middlewares

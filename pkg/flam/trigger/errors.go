@@ -22,6 +22,12 @@ var (
 	// positive.
 	ErrInvalidDelay = errors.New("invalid trigger delay")
 
+	// ErrInvalidSchedule is the error wrapped, along with the error of the
+	// parsing, by the error returned from
+	// [flam.ICronTriggerFactory.NewCron] when the schedule is not a valid
+	// cron expression, or names a time zone that cannot be loaded.
+	ErrInvalidSchedule = errors.New("invalid trigger schedule")
+
 	// ErrClosed is the error wrapped by the error returned from the
 	// [flam.ITriggerFactory] creation methods once the factory is closed.
 	ErrClosed = errors.New("trigger factory closed")
@@ -75,6 +81,20 @@ func newErrInvalidDelay(
 	return flam.NewWrappedError(ErrInvalidDelay, message).
 		With(ErrorFieldID, id).
 		With(ErrorFieldDelay, delay)
+}
+
+// newErrInvalidSchedule returns the error wrapping ErrInvalidSchedule,
+// joined with the error of the parsing, with the message and the
+// ErrorFieldID and ErrorFieldSchedule context fields.
+func newErrInvalidSchedule(
+	message string,
+	id string,
+	schedule flam.CronSchedule,
+	err error,
+) *flam.Error {
+	return flam.NewWrappedError(fmt.Errorf("%w: %w", ErrInvalidSchedule, err), message).
+		With(ErrorFieldID, id).
+		With(ErrorFieldSchedule, schedule)
 }
 
 // newErrClosed returns the error wrapping ErrClosed with the message and

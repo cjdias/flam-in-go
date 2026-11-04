@@ -82,3 +82,48 @@ type ICacheAdaptorCreator = IResourceCreator[ICacheAdaptor]
 
 // ICacheAdaptorFactory creates and holds the cache adaptors, one per id.
 type ICacheAdaptorFactory = IFactory[ICacheAdaptor]
+
+// ICacheKeyedAdaptor is an [ICacheAdaptor] that also tells the keys it
+// stores its objects under, and removes the values by key, for the code
+// working on the keys rather than on the objects: the
+// [github.com/cjdias/flam-in-go/pkg/flam/cache.Loader] deduplicates its
+// loads by key, and the adaptors of
+// [github.com/cjdias/flam-in-go/pkg/flam/cache/adaptors/invalidating] send
+// the keys to remove to the other processes. The memory, redis and
+// invalidating adaptors implement it.
+type ICacheKeyedAdaptor interface {
+	ICacheAdaptor
+
+	// Keys returns the key of each object, the one its other methods
+	// generate, failing as they do when one cannot be generated.
+	Keys(objects ...any) ([]string, error)
+
+	// DelKeys removes the values held under the keys, if any.
+	DelKeys(ctx context.Context, keys ...string) error
+}
+
+// ICacheAdaptorWrapperCreator is an [ICacheAdaptorCreator] whose adaptors
+// wrap other adaptors of the [ICacheAdaptorFactory] holding them. As the
+// container creates the factory with its creators, such a creator cannot
+// take the factory from the container: the factory created by the bundle
+// of [github.com/cjdias/flam-in-go/pkg/flam/cache] hands itself to every
+// creator of its group implementing this interface, once created, before
+// creating any adaptor.
+type ICacheAdaptorWrapperCreator interface {
+	ICacheAdaptorCreator
+
+	// UseFactory gives the creator the factory it takes the wrapped
+	// adaptors from.
+	UseFactory(factory ICacheAdaptorFactory)
+}
+
+// ICacheLoader is the interface of a
+// [github.com/cjdias/flam-in-go/pkg/flam/cache.Loader], for code reading
+// objects of type T through the cache, without depending on the Loader
+// type itself, so that tests can fake it.
+type ICacheLoader[T any] interface {
+	// Get sets the object, holding its identity, to its cached value, or
+	// else loads it and caches it. See
+	// [github.com/cjdias/flam-in-go/pkg/flam/cache.Loader.Get].
+	Get(ctx context.Context, obj *T) error
+}

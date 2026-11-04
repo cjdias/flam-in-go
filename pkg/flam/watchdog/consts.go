@@ -41,9 +41,11 @@ const (
 
 	// SignalsConfigPath is the configuration path of a bool telling
 	// whether the kennel, while it runs its processes, closes itself, and
-	// so its processes, on an interrupt or a SIGTERM signal, so that the
-	// run of the application ends, a second signal ending the program as
-	// usual. It defaults to true.
+	// so its processes, on an interrupt or a SIGTERM signal, after the
+	// drain delay at [DrainDelayConfigPath], so that the run of the
+	// application ends, a second signal cutting the drain short, and a
+	// signal following the drain ending the program as usual. It defaults
+	// to true.
 	SignalsConfigPath = "flam.watchdog.signals"
 
 	// RestartDelayConfigPath is the configuration path of the delay before
@@ -59,6 +61,14 @@ const (
 	// shorter than the restart delay. It defaults to 30s, or to the restart
 	// delay when longer, 0 restarting a process at once every time.
 	RestartMaxDelayConfigPath = "flam.watchdog.restart_max_delay"
+
+	// DrainDelayConfigPath is the configuration path of the time the
+	// kennel drains on a signal before closing itself, a duration such as
+	// "5s": its IsDraining method then reports true, so that the readiness
+	// probe fails and the load balancers stop sending requests, while the
+	// processes, such as the servers, keep running. It defaults to 0,
+	// closing the kennel at once.
+	DrainDelayConfigPath = "flam.watchdog.drain_delay"
 )
 
 // Fields of a process configuration, at [ProcessConfigPath].
@@ -91,7 +101,8 @@ const (
 	ErrorFieldID = "id"
 
 	// ErrorFieldField holds the name of an invalid configuration field, or
-	// the path of an invalid process configuration or restart delay.
+	// the path of an invalid process configuration, restart delay or
+	// drain delay.
 	ErrorFieldField = "field"
 
 	// ErrorFieldLogger holds the id of the logger adaptor of a process.
@@ -115,6 +126,7 @@ const (
 	defaultActive          = true
 	defaultRestartDelay    = 100 * time.Millisecond
 	defaultRestartMaxDelay = 30 * time.Second
+	defaultDrainDelay      = time.Duration(0)
 
 	// minRestartDelay is the least delay of a restart following another
 	// one, doubled from a delay of 0.

@@ -15,4 +15,11 @@
 // [github.com/cjdias/flam-in-go/pkg/flam.IClock] of the container: it is
 // removed when found expired by a call, or by the sweep a write runs once
 // per sweep period, removing every expired value.
+//
+// The adaptors implement
+// [github.com/cjdias/flam-in-go/pkg/flam.ICacheKeyedAdaptor], telling the
+// keys of the objects and removing the values by key, so that they can be
+// wrapped by the adaptors of
+// [github.com/cjdias/flam-in-go/pkg/flam/cache/adaptors/invalidating],
+// removing the values held by the other processes.
 package memory

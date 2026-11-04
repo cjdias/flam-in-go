@@ -20,6 +20,12 @@ const (
 	// processes the check watches, every process of the kennel unless
 	// set.
 	ConfigFieldProcesses = "processes"
+
+	// ConfigFieldDraining is the field holding whether the check fails
+	// while the kennel drains on a signal, a bool, true unless set, so
+	// that the readiness probe fails during the drain set at
+	// [github.com/cjdias/flam-in-go/pkg/flam/watchdog.DrainDelayConfigPath].
+	ConfigFieldDraining = "draining"
 )
 
 // Context fields of the [*flam.Error] values returned by the creator and
@@ -41,5 +47,6 @@ const (
 
 // Defaults of the fields of a check configuration.
 const (
-	defaultKind = health.KindReadiness
+	defaultKind     = health.KindReadiness
+	defaultDraining = true
 )

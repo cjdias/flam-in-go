@@ -44,8 +44,9 @@ func (e *env) breaker(t *testing.T, id string) flam.IClientCircuitBreaker {
 // create returns the client "main" of the fields, created by the factory
 // of an app with the client bundle, the standard driver bundles and their
 // defaults, the "cb" breaker, opening after 2 failures for 10s and
-// closing after 1 trial, the values and a fake clock.
-func create(t *testing.T, fields container.Bag, values map[string]any) (*env, error) {
+// closing after 1 trial, the values and a fake clock, after calling the
+// setups, such as to provide a tracer provider.
+func create(t *testing.T, fields container.Bag, values map[string]any, setups ...func(app *testutil.App)) (*env, error) {
 	t.Helper()
 	bundles := []flam.IBundle{config.NewBundle(), client.NewBundle(), breakerstandard.NewBundle(), standard.NewBundle()}
 	bag := container.Bag{}
@@ -71,6 +72,9 @@ func create(t *testing.T, fields container.Bag, values map[string]any) (*env, er
 	e := &env{clock: testutil.NewClock(time.Unix(0, 0))}
 	app := testutil.NewApp()
 	testutil.NoError(t, app.Provide(func() flam.IClock { return e.clock }))
+	for _, setup := range setups {
+		setup(app)
+	}
 	for _, b := range bundles {
 		testutil.NoError(t, app.RegisterBundle(b))
 	}
@@ -245,11 +249,28 @@ func Test_Declarations(t *testing.T) {
 		"ConfigFieldRetries":             {standard.ConfigFieldRetries, "retries"},
 		"ConfigFieldRetryDelay":          {standard.ConfigFieldRetryDelay, "retry_delay"},
 		"ConfigFieldRetryMaxDelay":       {standard.ConfigFieldRetryMaxDelay, "retry_max_delay"},
+		"ConfigFieldTracing":             {standard.ConfigFieldTracing, "tracing"},
+		"ConfigFieldMetrics":             {standard.ConfigFieldMetrics, "metrics"},
+		"ConfigFieldNamespace":           {standard.ConfigFieldNamespace, "namespace"},
 		"DefaultTimeoutConfigPath":       {standard.DefaultTimeoutConfigPath, "flam.client.defaults.clients.standard.timeout"},
 		"DefaultHeadersConfigPath":       {standard.DefaultHeadersConfigPath, "flam.client.defaults.clients.standard.headers"},
 		"DefaultRetriesConfigPath":       {standard.DefaultRetriesConfigPath, "flam.client.defaults.clients.standard.retries"},
 		"DefaultRetryDelayConfigPath":    {standard.DefaultRetryDelayConfigPath, "flam.client.defaults.clients.standard.retry_delay"},
 		"DefaultRetryMaxDelayConfigPath": {standard.DefaultRetryMaxDelayConfigPath, "flam.client.defaults.clients.standard.retry_max_delay"},
+		"DefaultTracingConfigPath":       {standard.DefaultTracingConfigPath, "flam.client.defaults.clients.standard.tracing"},
+		"DefaultMetricsConfigPath":       {standard.DefaultMetricsConfigPath, "flam.client.defaults.clients.standard.metrics"},
+		"DefaultNamespaceConfigPath":     {standard.DefaultNamespaceConfigPath, "flam.client.defaults.clients.standard.namespace"},
+		"ScopeName":                      {standard.ScopeName, "github.com/cjdias/flam-in-go/pkg/flam/client/clients/standard"},
+		"MetricRequests":                 {standard.MetricRequests, "requests_total"},
+		"MetricDuration":                 {standard.MetricDuration, "request_duration_seconds"},
+		"Subsystem":                      {standard.Subsystem, "client"},
+		"LabelClient":                    {standard.LabelClient, "client"},
+		"LabelMethod":                    {standard.LabelMethod, "method"},
+		"LabelCode":                      {standard.LabelCode, "code"},
+		"MethodOther":                    {standard.MethodOther, "OTHER"},
+		"ErrorTypeOpen":                  {standard.ErrorTypeOpen, "circuit_open"},
+		"ErrorTypeTimeout":               {standard.ErrorTypeTimeout, "timeout"},
+		"ErrorTypeCanceled":              {standard.ErrorTypeCanceled, "canceled"},
 		"ErrorFieldID":                   {standard.ErrorFieldID, "id"},
 		"ErrorFieldField":                {standard.ErrorFieldField, "field"},
 		"ErrorFieldBreaker":              {standard.ErrorFieldBreaker, "breaker"},
@@ -264,6 +285,7 @@ func Test_Declarations(t *testing.T) {
 		"ErrInvalidRequest": standard.ErrInvalidRequest,
 		"ErrOpen":           standard.ErrOpen,
 		"ErrRequest":        standard.ErrRequest,
+		"ErrRegister":       standard.ErrRegister,
 	} {
 		if err == nil {
 			t.Errorf("%s = nil", name)
@@ -295,6 +317,9 @@ func Test_Bundles(t *testing.T) {
 			standard.DefaultRetriesConfigPath:           0,
 			standard.DefaultRetryDelayConfigPath:        "100ms",
 			standard.DefaultRetryMaxDelayConfigPath:     "2s",
+			standard.DefaultTracingConfigPath:           true,
+			standard.DefaultMetricsConfigPath:           true,
+			standard.DefaultNamespaceConfigPath:         "flam",
 		} {
 			testutil.Equal(t, path, bag.Get(path), want)
 		}
@@ -428,6 +453,9 @@ func Test_Creator(t *testing.T) {
 		"an invalid retry delay":            {container.Bag{standard.ConfigFieldRetryDelay: "-1s"}, nil, standard.ConfigFieldRetryDelay},
 		"an invalid retry max delay":        {container.Bag{standard.ConfigFieldRetryMaxDelay: 1}, nil, standard.ConfigFieldRetryMaxDelay},
 		"a retry max delay below the delay": {container.Bag{standard.ConfigFieldRetryDelay: "3s"}, nil, standard.ConfigFieldRetryMaxDelay},
+		"a tracing of another type":         {container.Bag{standard.ConfigFieldTracing: "yes"}, nil, standard.ConfigFieldTracing},
+		"a metrics of another type":         {container.Bag{standard.ConfigFieldMetrics: 1}, nil, standard.ConfigFieldMetrics},
+		"a namespace of another type":       {container.Bag{standard.ConfigFieldNamespace: 1}, nil, standard.ConfigFieldNamespace},
 	} {
 		t.Run("should fail to create a client with "+name, func(t *testing.T) {
 			_, err := create(t, tc.fields, tc.values)

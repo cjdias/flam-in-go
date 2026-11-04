@@ -57,6 +57,21 @@ const (
 	// ConfigFieldRetryMaxDelay is the field holding the maximum delay
 	// before a retry, a duration not shorter than the retry delay.
 	ConfigFieldRetryMaxDelay = "retry_max_delay"
+
+	// ConfigFieldTracing is the field holding the bool telling whether the
+	// client traces its requests, which it does only when the container
+	// provides a tracer provider and a propagator.
+	ConfigFieldTracing = "tracing"
+
+	// ConfigFieldMetrics is the field holding the bool telling whether the
+	// client measures its requests, which it does only when the container
+	// provides a Prometheus registerer.
+	ConfigFieldMetrics = "metrics"
+
+	// ConfigFieldNamespace is the field holding the namespace of the
+	// metrics of the client, the first part of their names, a string,
+	// empty for none.
+	ConfigFieldNamespace = "namespace"
 )
 
 // Configuration paths of the values taken by the fields missing from a
@@ -82,6 +97,70 @@ const (
 	// DefaultRetryMaxDelayConfigPath is the path of the default of
 	// [ConfigFieldRetryMaxDelay], "2s" unless set.
 	DefaultRetryMaxDelayConfigPath = "flam.client.defaults.clients.standard.retry_max_delay"
+
+	// DefaultTracingConfigPath is the path of the default of
+	// [ConfigFieldTracing], true unless set.
+	DefaultTracingConfigPath = "flam.client.defaults.clients.standard.tracing"
+
+	// DefaultMetricsConfigPath is the path of the default of
+	// [ConfigFieldMetrics], true unless set.
+	DefaultMetricsConfigPath = "flam.client.defaults.clients.standard.metrics"
+
+	// DefaultNamespaceConfigPath is the path of the default of
+	// [ConfigFieldNamespace], "flam" unless set.
+	DefaultNamespaceConfigPath = "flam.client.defaults.clients.standard.namespace"
+)
+
+// ScopeName is the name of the instrumentation scope of the spans of the
+// clients, the name of the tracer they start them with.
+const ScopeName = "github.com/cjdias/flam-in-go/pkg/flam/client/clients/standard"
+
+// Names of the metrics, following the namespace and the [Subsystem].
+const (
+	// MetricRequests is the name of the counter of the attempts of the
+	// requests, retries included.
+	MetricRequests = "requests_total"
+
+	// MetricDuration is the name of the histogram of the time taken by the
+	// attempts of the requests to get their response headers, in seconds.
+	MetricDuration = "request_duration_seconds"
+
+	// Subsystem is the subsystem of the metrics, following their
+	// namespace in their names, such as "flam_client_requests_total".
+	Subsystem = "client"
+)
+
+// Labels of the metrics.
+const (
+	// LabelClient holds the id of the client.
+	LabelClient = "client"
+
+	// LabelMethod holds the method of the request, or [MethodOther].
+	LabelMethod = "method"
+
+	// LabelCode holds the status of the response, such as "200", or the
+	// type of the error of an attempt without response: [ErrorTypeOpen],
+	// [ErrorTypeTimeout], [ErrorTypeCanceled] or "_OTHER".
+	LabelCode = "code"
+)
+
+const (
+	// MethodOther is the value of [LabelMethod] for the requests of a
+	// method other than the standard ones.
+	MethodOther = "OTHER"
+
+	// ErrorTypeOpen is the type of the error of an attempt refused by the
+	// circuit breaker, held by the "error.type" attribute of its span and
+	// by [LabelCode].
+	ErrorTypeOpen = "circuit_open"
+
+	// ErrorTypeTimeout is the type of the error of an attempt whose
+	// timeout, or the deadline of its context, elapsed.
+	ErrorTypeTimeout = "timeout"
+
+	// ErrorTypeCanceled is the type of the error of an attempt whose
+	// context was cancelled.
+	ErrorTypeCanceled = "canceled"
 )
 
 // Context fields of the [*flam.Error] values returned by the creator and
@@ -110,6 +189,9 @@ const (
 	defaultRetries       = 0
 	defaultRetryDelay    = 100 * time.Millisecond
 	defaultRetryMaxDelay = 2 * time.Second
+	defaultTracing       = true
+	defaultMetrics       = true
+	defaultNamespace     = "flam"
 )
 
 // Settings of the transport of the clients, those of

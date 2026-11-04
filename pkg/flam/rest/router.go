@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
+	"sync"
 
 	"github.com/cjdias/flam-in-go/pkg/flam"
 	"github.com/cjdias/flam-in-go/pkg/flam/envelope"
@@ -45,19 +47,25 @@ func NewRouter(
 }
 
 // Router is the [flam.IRestRouter] returned by [NewRouter], serving the
-// requests of the endpoints it registered as an [http.Handler]. It is safe
-// for concurrent use.
+// requests of the endpoints it registered as an [http.Handler], and
+// listing them as a [flam.IRestEndpointLister]. It is safe for concurrent
+// use.
 type Router struct {
 	serviceId   int
 	middlewares []flam.IRestMiddleware
 	mux         *http.ServeMux
 	unmatched   http.Handler
+
+	mu        sync.RWMutex
+	endpoints []flam.RestEndpoint
 }
 
-// compile time checks that *Router implements IRestRouter and Handler
+// compile time checks that *Router implements IRestRouter,
+// IRestEndpointLister and Handler
 var (
-	_ flam.IRestRouter = (*Router)(nil)
-	_ http.Handler     = (*Router)(nil)
+	_ flam.IRestRouter         = (*Router)(nil)
+	_ flam.IRestEndpointLister = (*Router)(nil)
+	_ http.Handler             = (*Router)(nil)
 )
 
 // Handle registers the handler of the endpoint, its ServiceId set to the
@@ -91,7 +99,23 @@ func (r *Router) Handle(
 	if err != nil {
 		return err
 	}
-	return r.handle(endpoint, handler)
+	if err := r.handle(endpoint, handler); err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.endpoints = append(r.endpoints, endpoint)
+	return nil
+}
+
+// Endpoints returns a copy of the list of the endpoints registered, in
+// their order of registration, their ServiceId set to the id of the
+// service, such as to document them.
+func (r *Router) Endpoints() []flam.RestEndpoint {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return slices.Clone(r.endpoints)
 }
 
 // ServeHTTP serves the request with the handler of the endpoint whose

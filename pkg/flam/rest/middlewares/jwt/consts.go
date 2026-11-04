@@ -40,8 +40,44 @@ const (
 	// middleware is created.
 	ConfigFieldPublicKeyFile = "public_key_file"
 
+	// ConfigFieldJWKSURL is the field holding the https URL of the JSON
+	// Web Key Set of the RSA, ECDSA and Ed25519 public keys, fetched when
+	// first needed, and again every [ConfigFieldJWKSRefresh] or when a
+	// token names a key it does not hold.
+	ConfigFieldJWKSURL = "jwks_url"
+
+	// ConfigFieldIssuerURL is the field holding the https URL of the
+	// OpenID Connect issuer, whose discovery document, at
+	// "{issuer_url}/.well-known/openid-configuration", gives the URL of
+	// the key set, read as [ConfigFieldJWKSURL]. It is also the default of
+	// [ConfigFieldIssuer].
+	ConfigFieldIssuerURL = "issuer_url"
+
+	// ConfigFieldJWKSRefresh is the field holding the time the fetched key
+	// set is used before being fetched again, a time.Duration or a string
+	// such as "1h", over 0.
+	ConfigFieldJWKSRefresh = "jwks_refresh"
+
+	// ConfigFieldJWKSMinRefresh is the field holding the minimum time
+	// between two fetches of the key set, bounding the fetches the tokens
+	// naming unknown keys cause, a time.Duration or a string such as "1m",
+	// over 0.
+	ConfigFieldJWKSMinRefresh = "jwks_min_refresh"
+
+	// ConfigFieldJWKSTimeout is the field holding the time a fetch of the
+	// discovery document and of the key set may take, a time.Duration or
+	// a string such as "10s", over 0.
+	ConfigFieldJWKSTimeout = "jwks_timeout"
+
+	// ConfigFieldJWKSClient is the field holding the id of the
+	// [github.com/cjdias/flam-in-go/pkg/flam.IClient] fetching the key
+	// set, taken from the client factory of the container, a string,
+	// empty for a plain HTTP client.
+	ConfigFieldJWKSClient = "jwks_client"
+
 	// ConfigFieldIssuer is the field holding the issuer the "iss" claim of
-	// the tokens must hold, a string, not checked when empty.
+	// the tokens must hold, a string, not checked when empty, unless
+	// [ConfigFieldIssuerURL] is set.
 	ConfigFieldIssuer = "issuer"
 
 	// ConfigFieldAudience is the field holding the audience the "aud"
@@ -62,8 +98,8 @@ const (
 )
 
 // Configuration paths of the values taken by the fields missing from a
-// middleware configuration. The secret and the public keys have none, as
-// they belong to each middleware.
+// middleware configuration. The secret, the public keys and the URLs have
+// none, as they belong to each middleware.
 const (
 	// DefaultAlgorithmsConfigPath is the path of the default of
 	// [ConfigFieldAlgorithms], "HS256" unless changed.
@@ -88,7 +124,27 @@ const (
 	// DefaultRequireExpirationConfigPath is the path of the default of
 	// [ConfigFieldRequireExpiration], true unless changed.
 	DefaultRequireExpirationConfigPath = "flam.rest.defaults.middlewares.jwt.require_expiration"
+
+	// DefaultJWKSRefreshConfigPath is the path of the default of
+	// [ConfigFieldJWKSRefresh], "1h" unless changed.
+	DefaultJWKSRefreshConfigPath = "flam.rest.defaults.middlewares.jwt.jwks_refresh"
+
+	// DefaultJWKSMinRefreshConfigPath is the path of the default of
+	// [ConfigFieldJWKSMinRefresh], "1m" unless changed.
+	DefaultJWKSMinRefreshConfigPath = "flam.rest.defaults.middlewares.jwt.jwks_min_refresh"
+
+	// DefaultJWKSTimeoutConfigPath is the path of the default of
+	// [ConfigFieldJWKSTimeout], "10s" unless changed.
+	DefaultJWKSTimeoutConfigPath = "flam.rest.defaults.middlewares.jwt.jwks_timeout"
+
+	// DefaultJWKSClientConfigPath is the path of the default of
+	// [ConfigFieldJWKSClient], empty unless changed.
+	DefaultJWKSClientConfigPath = "flam.rest.defaults.middlewares.jwt.jwks_client"
 )
+
+// JWKSMaxSize is the maximum size, in bytes, of the discovery document and
+// of the key set, a larger one failing the fetch.
+const JWKSMaxSize = 1 << 20
 
 // Values of the WWW-Authenticate header of the 401 answers, as RFC 6750
 // defines them.
@@ -118,6 +174,10 @@ const (
 	defaultLeeway            = time.Duration(0)
 	defaultOptional          = false
 	defaultRequireExpiration = true
+	defaultJWKSRefresh       = time.Hour
+	defaultJWKSMinRefresh    = time.Minute
+	defaultJWKSTimeout       = 10 * time.Second
+	defaultJWKSClient        = ""
 )
 
 // defaultAlgorithms returns the default of [ConfigFieldAlgorithms], a new

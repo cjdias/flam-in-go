@@ -28,10 +28,15 @@ type redisBroker struct {
 	claimIdle time.Duration
 	maxLen    int64
 	registry  *base.Registry
+	telemetry *base.Telemetry
 }
 
-// compile time check that *redisBroker implements IBroker
-var _ flam.IBroker = (*redisBroker)(nil)
+// compile time checks that *redisBroker implements IBroker and
+// IHealthPinger
+var (
+	_ flam.IBroker       = (*redisBroker)(nil)
+	_ flam.IHealthPinger = (*redisBroker)(nil)
+)
 
 func (b *redisBroker) Id() string {
 	return b.id
@@ -40,7 +45,8 @@ func (b *redisBroker) Id() string {
 // Publish publishes the message with PUBLISH, as a JSON envelope holding
 // the payload and the headers, in the pubsub mode, or adds it to the
 // stream of the topic with XADD, as the [StreamFieldPayload] field and a
-// field per header, in the streams mode.
+// field per header, in the streams mode, traced and measured by the
+// telemetry of the broker.
 func (b *redisBroker) Publish(
 	ctx context.Context,
 	topic string,
@@ -50,27 +56,9 @@ func (b *redisBroker) Publish(
 	if err := b.registry.CheckPublish(brokerPublishMessage, topic); err != nil {
 		return err
 	}
-
-	var err error
-	if b.mode == ModePubSub {
-		data, _ := json.Marshal(envelope{Headers: headers, Payload: payload}) // a map of strings and bytes always encode
-		err = b.conn.Publish(ctx, topic, data).Err()
-	} else {
-		values := []any{StreamFieldPayload, payload}
-		for name, value := range headers {
-			values = append(values, StreamFieldHeaderPrefix+name, value)
-		}
-		err = b.conn.XAdd(ctx, &goredis.XAddArgs{
-			Stream: topic,
-			MaxLen: b.maxLen,
-			Approx: b.maxLen > 0,
-			Values: values,
-		}).Err()
-	}
-	if err != nil {
-		return base.NewErrTopic(broker.ErrPublish, brokerPublishMessage, b.id, topic, err)
-	}
-	return nil
+	return b.telemetry.Publish(ctx, topic, headers, func(ctx context.Context, headers map[string]string) error {
+		return b.publish(ctx, topic, payload, headers)
+	})
 }
 
 // Subscribe subscribes to the channel of the topic with SUBSCRIBE in the
@@ -92,6 +80,17 @@ func (b *redisBroker) Subscribe(
 	return b.subscribeStream(sub, handler)
 }
 
+// Ping sends PING over the connection of the broker, for the health
+// checks, a nil context being the background one.
+func (b *redisBroker) Ping(
+	ctx context.Context,
+) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return b.conn.Ping(ctx).Err()
+}
+
 // Close closes the subscriptions of the broker, but not its connection,
 // owned by the connection factory.
 func (b *redisBroker) Close() error {
@@ -103,6 +102,35 @@ const (
 	brokerPublishMessage   = "unable to publish redis broker message"
 	brokerSubscribeMessage = "unable to subscribe to redis broker topic"
 )
+
+// publish publishes the message in the mode of the broker.
+func (b *redisBroker) publish(
+	ctx context.Context,
+	topic string,
+	payload []byte,
+	headers map[string]string,
+) error {
+	var err error
+	if b.mode == ModePubSub {
+		data, _ := json.Marshal(envelope{Headers: headers, Payload: payload}) // a map of strings and bytes always encode
+		err = b.conn.Publish(ctx, topic, data).Err()
+	} else {
+		values := []any{StreamFieldPayload, payload}
+		for name, value := range headers {
+			values = append(values, StreamFieldHeaderPrefix+name, value)
+		}
+		err = b.conn.XAdd(ctx, &goredis.XAddArgs{
+			Stream: topic,
+			MaxLen: b.maxLen,
+			Approx: b.maxLen > 0,
+			Values: values,
+		}).Err()
+	}
+	if err != nil {
+		return base.NewErrTopic(broker.ErrPublish, brokerPublishMessage, b.id, topic, err)
+	}
+	return nil
+}
 
 // envelope is the JSON encoding of a message of the pubsub mode, its
 // payload being encoded in base64, or as null when nil.
@@ -146,7 +174,7 @@ func (b *redisBroker) subscribeChannel(
 				if !ok {
 					return base.ReceiveErr(ctx, brokerReceiveMessage, b.id, sub.Topic(), errChannelClosed)
 				}
-				_ = base.Handle(ctx, b.id, handler, channelMessage(m))
+				_ = b.telemetry.Handle(ctx, sub.Topic(), handler, channelMessage(m))
 			}
 		}
 	}
@@ -280,7 +308,7 @@ func (b *redisBroker) handleEntries(
 		if ctx.Err() != nil {
 			return
 		}
-		if base.Handle(ctx, b.id, handler, streamMessage(topic, entry)) == nil {
+		if b.telemetry.Handle(ctx, topic, handler, streamMessage(topic, entry)) == nil {
 			_ = b.conn.XAck(ctx, topic, b.group, entry.ID).Err() // unacknowledged, it is claimed again
 		}
 	}

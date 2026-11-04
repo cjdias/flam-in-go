@@ -1,6 +1,7 @@
 package flam
 
 import (
+	"context"
 	"io"
 	"math"
 	"reflect"
@@ -171,6 +172,45 @@ type ILogger interface {
 	// given the next ones: Flush returns the error of each failed stream,
 	// joined.
 	Flush() error
+}
+
+// ILogContextExtractor extracts from a [context.Context] the request
+// scoped fields an [IContextLogger] adds to the context of the entries
+// given with it, such as the ids of the trace and span of the context, or
+// the id of the request it serves. The log bundle collects the extractors
+// provided in its extractor container group.
+type ILogContextExtractor interface {
+	// Extract returns the fields held by the context, or nil, or an empty
+	// bag, when it holds none. The context may be nil. Extract is called
+	// for every entry given with a context, possibly concurrently.
+	Extract(ctx context.Context) IBag
+}
+
+// IContextLogger is an [ILogger] also taking the [context.Context] an
+// entry is given in: the fields its [ILogContextExtractor] values extract
+// from it are merged into the context of the entry, the contexts given
+// along winning over them. A nil context carries no field.
+//
+// It extends ILogger without changing it: code holding an ILogger checks
+// whether it is an IContextLogger, falling back to the context free
+// methods otherwise.
+type IContextLogger interface {
+	ILogger
+
+	SignalContext(ctx context.Context, level LogLevel, channel, message string, bags ...IBag)
+	SignalFatalContext(ctx context.Context, channel, message string, bags ...IBag)
+	SignalErrorContext(ctx context.Context, channel, message string, bags ...IBag)
+	SignalWarningContext(ctx context.Context, channel, message string, bags ...IBag)
+	SignalNoticeContext(ctx context.Context, channel, message string, bags ...IBag)
+	SignalInfoContext(ctx context.Context, channel, message string, bags ...IBag)
+	SignalDebugContext(ctx context.Context, channel, message string, bags ...IBag)
+	BroadcastContext(ctx context.Context, level LogLevel, message string, bags ...IBag)
+	BroadcastFatalContext(ctx context.Context, message string, bags ...IBag)
+	BroadcastErrorContext(ctx context.Context, message string, bags ...IBag)
+	BroadcastWarningContext(ctx context.Context, message string, bags ...IBag)
+	BroadcastNoticeContext(ctx context.Context, message string, bags ...IBag)
+	BroadcastInfoContext(ctx context.Context, message string, bags ...IBag)
+	BroadcastDebugContext(ctx context.Context, message string, bags ...IBag)
 }
 
 // logLevelOf returns the level held by the value, as described by

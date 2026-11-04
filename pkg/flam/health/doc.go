@@ -14,7 +14,10 @@
 //	    checks:
 //	      main: {driver: flam.health.checks.driver.database}
 //	      cache: {driver: flam.health.checks.driver.redis, connection: main}
-//	      servers: {driver: flam.health.checks.driver.kennel, kind: both}
+//	      servers: {driver: flam.health.checks.driver.kennel}
+//	      events: {driver: flam.health.checks.driver.broker, topic: health}
+//	      search: {driver: flam.health.checks.driver.http, url: "http://search:9200"}
+//	      uploads: {driver: flam.health.checks.driver.disk, disk: s3}
 //
 // The application may also provide its own checks, made with [NewCheck],
 // in the [CheckGroup] container group, such as:
@@ -31,6 +34,12 @@
 // may be reused for the time at [CacheConfigPath], by both probes. The
 // probe fails when one of its checks fails, and succeeds otherwise, as
 // when it has none.
+//
+// The kennel check fails once the
+// [github.com/cjdias/flam-in-go/pkg/flam.IKennel] drains on a shutdown
+// signal, so that the readiness probe fails while the servers still
+// serve, for the drain delay set at
+// [github.com/cjdias/flam-in-go/pkg/flam/watchdog.DrainDelayConfigPath].
 //
 // The drivers live in the sub packages of
 // [github.com/cjdias/flam-in-go/pkg/flam/health/checks], reading the

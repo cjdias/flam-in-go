@@ -3,13 +3,14 @@ package adaptors
 import (
 	"github.com/cjdias/flam-in-go/pkg/flam"
 	"github.com/cjdias/flam-in-go/pkg/flam/bundle"
+	"github.com/cjdias/flam-in-go/pkg/flam/cache/adaptors/invalidating"
 	"github.com/cjdias/flam-in-go/pkg/flam/cache/adaptors/memory"
 	"github.com/cjdias/flam-in-go/pkg/flam/cache/adaptors/redis"
 )
 
 // NewBundle returns the [flam.IBundle] registering the bundles of every
-// cache adaptor driver, [redis.NewBundle] and [memory.NewBundle], to be
-// registered along with the bundle of
+// cache adaptor driver, [redis.NewBundle], [memory.NewBundle] and
+// [invalidating.NewBundle], to be registered along with the bundle of
 // [github.com/cjdias/flam-in-go/pkg/flam/cache.NewBundle], which provides
 // the [flam.ICacheAdaptorFactory]. Do not register any of the driver
 // bundles along with this one, as a bundle id can only be registered
@@ -34,5 +35,6 @@ func (b *bundleImpl) Register(
 	return bundle.NewRegisterer(app).
 		QueueBundle(redis.NewBundle()).
 		QueueBundle(memory.NewBundle()).
+		QueueBundle(invalidating.NewBundle()).
 		Register()
 }

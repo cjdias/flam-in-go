@@ -3,14 +3,17 @@ package stores
 import (
 	"github.com/cjdias/flam-in-go/pkg/flam"
 	"github.com/cjdias/flam-in-go/pkg/flam/bundle"
+	"github.com/cjdias/flam-in-go/pkg/flam/secrets/stores/awssm"
 	"github.com/cjdias/flam-in-go/pkg/flam/secrets/stores/env"
 	"github.com/cjdias/flam-in-go/pkg/flam/secrets/stores/file"
+	"github.com/cjdias/flam-in-go/pkg/flam/secrets/stores/gcpsm"
 	"github.com/cjdias/flam-in-go/pkg/flam/secrets/stores/vault"
 )
 
 // NewBundle returns the [flam.IBundle] registering the bundles of every
-// secret store driver, [env.NewBundle], [file.NewBundle] and
-// [vault.NewBundle], to be registered along with the bundle of
+// secret store driver, [env.NewBundle], [file.NewBundle],
+// [vault.NewBundle], [awssm.NewBundle] and [gcpsm.NewBundle], to be
+// registered along with the bundle of
 // [github.com/cjdias/flam-in-go/pkg/flam/secrets.NewBundle], which provides
 // the [flam.ISecretStoreFactory]. Do not register any of the driver
 // bundles along with this one, as a bundle id can only be registered once.
@@ -35,5 +38,7 @@ func (b *bundleImpl) Register(
 		QueueBundle(env.NewBundle()).
 		QueueBundle(file.NewBundle()).
 		QueueBundle(vault.NewBundle()).
+		QueueBundle(awssm.NewBundle()).
+		QueueBundle(gcpsm.NewBundle()).
 		Register()
 }

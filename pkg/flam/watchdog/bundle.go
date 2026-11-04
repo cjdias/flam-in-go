@@ -20,8 +20,8 @@ import (
 // The bundle implements [flam.IRunnableBundle]: when the application
 // runs, it runs the active processes of the kennel, unless
 // [RunConfigPath] holds false, until they all end, closing the kennel on
-// an interrupt or a SIGTERM signal, unless [SignalsConfigPath] holds
-// false. When the kennel could not be created, as its delays are invalid
+// an interrupt or a SIGTERM signal, after draining for the delay at
+// [DrainDelayConfigPath], unless [SignalsConfigPath] holds false. When the kennel could not be created, as its delays are invalid
 // or a process of [ProcessGroup] could not be added, the processes are
 // closed, the provider of the kennel fails with that error, and the run
 // of the application, or else its close, reports it once. As the run of the application runs the bundles one after the

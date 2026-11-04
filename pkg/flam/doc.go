@@ -22,7 +22,9 @@
 //     [github.com/cjdias/flam-in-go/pkg/flam/clock];
 //   - ITrigger is the interface of a timer calling a callback once or
 //     periodically, created and tracked by an ITriggerFactory reading the
-//     time from an IClock, implemented in
+//     time from an IClock, and ICronTrigger the one of a timer calling it
+//     at the times matched by a CronSchedule, created by an
+//     ICronTriggerFactory, implemented in
 //     [github.com/cjdias/flam-in-go/pkg/flam/trigger];
 //   - IConfig is the interface of the shared configuration of an
 //     application, observable by path, implemented in
@@ -57,9 +59,13 @@
 //     implementing IWatchdogProcess, and runs them under watchdogs
 //     reporting to an IWatchdogLoggerAdaptor, implemented in
 //     [github.com/cjdias/flam-in-go/pkg/flam/watchdog];
+//   - IScheduledJob is a job run periodically, at the times matched by a
+//     cron expression, by the scheduler process of the IKennel,
+//     implemented in [github.com/cjdias/flam-in-go/pkg/flam/scheduler];
 //   - IRestServer serves the endpoints registered by the
 //     IRestEndpointRegister values of its group on its IRestRouter,
-//     through IRestMiddleware values, reporting to an
+//     which lists them as an IRestEndpointLister, such as to document
+//     them, through IRestMiddleware values, reporting to an
 //     IRestLoggerAdaptor, each held by its factory, run as a process of
 //     the IKennel, implemented in
 //     [github.com/cjdias/flam-in-go/pkg/flam/rest];
@@ -82,7 +88,25 @@
 //     [github.com/cjdias/flam-in-go/pkg/flam/broker];
 //   - ISecretStore reads secrets, such as from Vault, held by an
 //     ISecretStoreFactory, implemented in
-//     [github.com/cjdias/flam-in-go/pkg/flam/secrets].
+//     [github.com/cjdias/flam-in-go/pkg/flam/secrets];
+//   - IMongoConnection is the interface of a MongoDB connection, held by
+//     an IMongoConnectionFactory, implemented in
+//     [github.com/cjdias/flam-in-go/pkg/flam/mongo];
+//   - ILocker acquires the ILock values of distributed locks, with fencing
+//     tokens, and an ILeaderProcess runs a function while it holds one,
+//     implemented in [github.com/cjdias/flam-in-go/pkg/flam/lock];
+//   - IJobQueue enqueues background jobs handled by IJobHandler values,
+//     implemented in [github.com/cjdias/flam-in-go/pkg/flam/jobs], while
+//     [github.com/cjdias/flam-in-go/pkg/flam/outbox] publishes the
+//     messages written along with a database transaction;
+//   - IGrpcServer serves the gRPC services registered by the
+//     IGrpcServiceRegister values of its group, through IGrpcInterceptor
+//     values, run as a process of the IKennel, implemented in
+//     [github.com/cjdias/flam-in-go/pkg/flam/grpc];
+//   - IContextLogger signals log entries along with the fields an
+//     ILogContextExtractor reads from a context, such as the trace and the
+//     request ids, and IHealthPinger tells whether the backend of a
+//     resource answers, for the health checks.
 //
 // This package holds every contract of flam, and the implementations live
 // in sub packages importing this one, so that code can depend on the

@@ -446,3 +446,18 @@ func Test_Redis_Streams(t *testing.T) {
 		}
 	})
 }
+
+func Test_Redis_Ping(t *testing.T) {
+	b, _, server := redisBroker(t, container.Bag{})
+	pinger, ok := b.(flam.IHealthPinger)
+	testutil.Equal(t, "IHealthPinger", ok, true)
+
+	testutil.NoError(t, pinger.Ping(context.Background()))
+	var nilCtx context.Context
+	testutil.NoError(t, pinger.Ping(nilCtx))
+
+	server.Close()
+	if err := pinger.Ping(context.Background()); err == nil {
+		t.Error("Ping() = nil, want the error of the closed server")
+	}
+}

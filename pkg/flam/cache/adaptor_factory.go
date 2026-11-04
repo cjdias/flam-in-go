@@ -19,9 +19,19 @@ type adaptorFactoryArgs struct {
 
 // newAdaptorFactory returns the adaptor factory creating the adaptors
 // configured at AdaptorConfigPath with the creators of the
-// AdaptorCreatorGroup group.
+// AdaptorCreatorGroup group, handing it to those implementing
+// flam.ICacheAdaptorWrapperCreator.
 func newAdaptorFactory(
 	args adaptorFactoryArgs,
 ) (flam.ICacheAdaptorFactory, error) {
-	return factory.New(args.Config.Bag(AdaptorConfigPath), args.Creators...)
+	f, err := factory.New(args.Config.Bag(AdaptorConfigPath), args.Creators...)
+	if err != nil {
+		return nil, err
+	}
+	for _, creator := range args.Creators {
+		if wrapper, ok := creator.(flam.ICacheAdaptorWrapperCreator); ok {
+			wrapper.UseFactory(f)
+		}
+	}
+	return f, nil
 }

@@ -8,4 +8,8 @@
 // The adaptors of one server share its keys: give their key generators
 // different prefixes, or their connections different databases, to keep
 // them apart.
+//
+// The adaptors implement
+// [github.com/cjdias/flam-in-go/pkg/flam.ICacheKeyedAdaptor], telling the
+// keys of the objects and removing the values by key, with DEL.
 package redis

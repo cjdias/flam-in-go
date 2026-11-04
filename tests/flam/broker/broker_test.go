@@ -173,6 +173,31 @@ func Test_Declarations(t *testing.T) {
 	testutil.Equal(t, "ErrorFieldMessage", broker.ErrorFieldMessage, "message")
 	testutil.Equal(t, "ErrorFieldPanic", broker.ErrorFieldPanic, "panic")
 	testutil.Equal(t, "ErrorFieldStack", broker.ErrorFieldStack, "stack")
+	for name, pair := range map[string][2]string{
+		"ConfigFieldTracing":          {broker.ConfigFieldTracing, "tracing"},
+		"ConfigFieldMetrics":          {broker.ConfigFieldMetrics, "metrics"},
+		"ConfigFieldNamespace":        {broker.ConfigFieldNamespace, "namespace"},
+		"ConfigFieldTopicLabel":       {broker.ConfigFieldTopicLabel, "topic_label"},
+		"DefaultTracingConfigPath":    {broker.DefaultTracingConfigPath, "flam.broker.defaults.brokers.tracing"},
+		"DefaultMetricsConfigPath":    {broker.DefaultMetricsConfigPath, "flam.broker.defaults.brokers.metrics"},
+		"DefaultNamespaceConfigPath":  {broker.DefaultNamespaceConfigPath, "flam.broker.defaults.brokers.namespace"},
+		"DefaultTopicLabelConfigPath": {broker.DefaultTopicLabelConfigPath, "flam.broker.defaults.brokers.topic_label"},
+		"ScopeName":                   {broker.ScopeName, "github.com/cjdias/flam-in-go/pkg/flam/broker"},
+		"OperationPublish":            {broker.OperationPublish, "publish"},
+		"OperationProcess":            {broker.OperationProcess, "process"},
+		"MetricPublished":             {broker.MetricPublished, "messages_published_total"},
+		"MetricProcessed":             {broker.MetricProcessed, "messages_processed_total"},
+		"MetricProcessDuration":       {broker.MetricProcessDuration, "message_process_duration_seconds"},
+		"Subsystem":                   {broker.Subsystem, "broker"},
+		"LabelBroker":                 {broker.LabelBroker, "broker"},
+		"LabelTopic":                  {broker.LabelTopic, "topic"},
+		"LabelResult":                 {broker.LabelResult, "result"},
+		"ResultSuccess":               {broker.ResultSuccess, "success"},
+		"ResultError":                 {broker.ResultError, "error"},
+		"ResultPanic":                 {broker.ResultPanic, "panic"},
+	} {
+		testutil.Equal(t, name, pair[0], pair[1])
+	}
 	for sentinel, text := range map[error]string{
 		broker.ErrClosed:       "broker closed",
 		broker.ErrInvalidTopic: "invalid broker topic",
@@ -185,6 +210,7 @@ func Test_Declarations(t *testing.T) {
 		broker.ErrEncode:       "unable to encode broker message",
 		broker.ErrDecode:       "unable to decode broker message",
 		broker.ErrRunning:      "broker process running",
+		broker.ErrRegister:     "unable to register broker metrics",
 	} {
 		testutil.Equal(t, "sentinel", sentinel.Error(), text)
 	}

@@ -22,6 +22,7 @@ type kafkaBroker struct {
 	reader       kafkago.ReaderConfig
 	retryBackoff time.Duration
 	registry     *base.Registry
+	telemetry    *base.Telemetry
 }
 
 // compile time check that *kafkaBroker implements IBroker
@@ -33,7 +34,8 @@ func (b *kafkaBroker) Id() string {
 
 // Publish writes the message on the topic, its [HeaderKey] header, if
 // any, being its key, returning once its batch is written, as the
-// acknowledgements of the broker require, or at once when asynchronous.
+// acknowledgements of the broker require, or at once when asynchronous,
+// traced and measured by the telemetry of the broker.
 func (b *kafkaBroker) Publish(
 	ctx context.Context,
 	topic string,
@@ -43,19 +45,20 @@ func (b *kafkaBroker) Publish(
 	if err := b.registry.CheckPublish(brokerPublishMessage, topic); err != nil {
 		return err
 	}
-
-	msg := kafkago.Message{Topic: topic, Value: payload}
-	for name, value := range headers {
-		if name == HeaderKey {
-			msg.Key = []byte(value)
-			continue
+	return b.telemetry.Publish(ctx, topic, headers, func(ctx context.Context, headers map[string]string) error {
+		msg := kafkago.Message{Topic: topic, Value: payload}
+		for name, value := range headers {
+			if name == HeaderKey {
+				msg.Key = []byte(value)
+				continue
+			}
+			msg.Headers = append(msg.Headers, kafkago.Header{Key: name, Value: []byte(value)})
 		}
-		msg.Headers = append(msg.Headers, kafkago.Header{Key: name, Value: []byte(value)})
-	}
-	if err := b.writer.WriteMessages(ctx, msg); err != nil {
-		return base.NewErrTopic(broker.ErrPublish, brokerPublishMessage, b.id, topic, err)
-	}
-	return nil
+		if err := b.writer.WriteMessages(ctx, msg); err != nil {
+			return base.NewErrTopic(broker.ErrPublish, brokerPublishMessage, b.id, topic, err)
+		}
+		return nil
+	})
 }
 
 // Subscribe reads the topic with a reader of its own in the consumer group
@@ -108,7 +111,7 @@ func (b *kafkaBroker) read(
 			return base.ReceiveErr(ctx, brokerReceiveMessage, b.id, topic, err)
 		}
 		msg := message(m)
-		for base.Handle(ctx, b.id, handler, msg) != nil {
+		for b.telemetry.Handle(ctx, topic, handler, msg) != nil {
 			select {
 			case <-ctx.Done():
 				return nil

@@ -41,6 +41,13 @@ var (
 	// method, when receiving its messages fails.
 	ErrReceive = errors.New("unable to receive broker message")
 
+	// ErrRegister is the error wrapped, along with the error of the
+	// Prometheus registerer, by the error returned from the creator of a
+	// broker driver when the metrics of the broker cannot be registered,
+	// such as when its namespace is not a valid metric name, or when other
+	// metrics of the same names are registered.
+	ErrRegister = errors.New("unable to register broker metrics")
+
 	// ErrHandlerPanic is the error wrapped, joined with the panic value
 	// when it is an error, by the error a broker driver takes as returned
 	// by a handler that panicked, which leaves the message

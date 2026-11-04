@@ -1,9 +1,10 @@
 // Package full is the opt-in to every feature of flam: [New] returns the
 // application of [github.com/cjdias/flam-in-go/pkg/flam/app.New], which
 // registers the core bundles only, with the bundle of [NewBundle]
-// registering the database, migration, redis, cache, translator,
-// validator, secrets, client, broker, tracing, metrics, rest, health and
-// watchdog features and their drivers. The command feature of
+// registering the database, migration, mongo, redis, lock, cache,
+// translator, validator, secrets, client, broker, jobs, outbox, scheduler,
+// tracing, metrics, rest, grpc, health and watchdog features and their
+// drivers, along with the slog bridge of the log feature. The command feature of
 // [github.com/cjdias/flam-in-go/pkg/flam/command] is left out, as it reads
 // the arguments of the program: register its bundles to run commands.
 //

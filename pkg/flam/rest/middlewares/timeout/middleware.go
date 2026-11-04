@@ -28,11 +28,15 @@ func (m *middleware) Id() string {
 // own goroutine with a request whose context expires after the timeout,
 // writing the response buffered once next returns, or a 503 envelope when
 // the context is done before, and panicking with the value next panicked
-// with before.
+// with before. It returns next itself for a streaming endpoint, whose
+// response is neither bounded nor buffered.
 func (m *middleware) Wrap(
-	_ flam.RestEndpoint,
+	endpoint flam.RestEndpoint,
 	next http.Handler,
 ) http.Handler {
+	if endpoint.Streaming {
+		return next
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		ctx, cancel := context.WithTimeout(req.Context(), m.timeout)
 		defer cancel()

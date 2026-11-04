@@ -5,25 +5,37 @@ import (
 
 	natsgo "github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"go.uber.org/dig"
 
 	"github.com/cjdias/flam-in-go/pkg/flam"
+	"github.com/cjdias/flam-in-go/pkg/flam/broker"
 	"github.com/cjdias/flam-in-go/pkg/flam/broker/brokers/internal/base"
 	"github.com/cjdias/flam-in-go/pkg/flam/factory"
 )
+
+// creatorArgs are the dependencies of the creator, taken from the
+// container, the telemetry ones being optional.
+type creatorArgs struct {
+	dig.In
+
+	Config    flam.IConfig
+	Telemetry base.TelemetryArgs
+}
 
 // newCreator returns the [flam.IBrokerCreator] of the NATS brokers,
 // reading the defaults of the missing fields from the configuration. It is
 // the provider registered by the bundle returned from [NewBundle].
 func newCreator(
-	config flam.IConfig,
+	args creatorArgs,
 ) flam.IBrokerCreator {
-	return &creator{config: config}
+	return &creator{config: args.Config, telemetry: args.Telemetry}
 }
 
 // creator is the [flam.IBrokerCreator] of the configurations with the
 // [Driver] driver.
 type creator struct {
-	config flam.IConfig
+	config    flam.IConfig
+	telemetry base.TelemetryArgs
 }
 
 func (c *creator) Accept(
@@ -64,8 +76,13 @@ func (c *creator) Create(
 	subjects := r.Strings(ConfigFieldSubjects, "", nil, false)
 	r.Check(ConfigFieldAckWait, b.ackWait > 0)
 	r.Check(ConfigFieldStream, b.stream != "" || !b.jetStream)
+	telemetry := r.Telemetry()
 	if field := r.Invalid(); field != "" {
 		return nil, base.NewErrInvalidField(ErrInvalidField, creatorCreateMessage, id, field)
+	}
+	var err error
+	if b.telemetry, err = base.NewTelemetry(c.telemetry, telemetry, id, messagingSystem); err != nil {
+		return nil, base.NewErr(broker.ErrRegister, creatorCreateMessage, id, err)
 	}
 
 	options := []natsgo.Option{

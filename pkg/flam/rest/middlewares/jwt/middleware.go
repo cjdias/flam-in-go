@@ -25,11 +25,11 @@ func ClaimsOf(
 }
 
 // middleware is the jwt [flam.IRestMiddleware], verifying the bearer
-// tokens of the requests with its parser and key.
+// tokens of the requests with its parser and the keys of its keyring.
 type middleware struct {
 	id       string
 	parser   *gojwt.Parser
-	key      any
+	keys     keyring
 	optional bool
 }
 
@@ -62,8 +62,12 @@ func (m *middleware) Wrap(
 			return
 		}
 
+		ctx := req.Context()
+		keyFunc := func(t *gojwt.Token) (any, error) {
+			return m.keys.key(ctx, t)
+		}
 		claims := gojwt.MapClaims{}
-		if _, err := m.parser.ParseWithClaims(token, claims, m.keyFunc); err != nil {
+		if _, err := m.parser.ParseWithClaims(token, claims, keyFunc); err != nil {
 			middlewareReject(w, req, ErrInvalidToken, ChallengeInvalid)
 			return
 		}
@@ -73,7 +77,7 @@ func (m *middleware) Wrap(
 			return
 		}
 
-		ctx := context.WithValue(req.Context(), claimsKey{}, claims)
+		ctx = context.WithValue(ctx, claimsKey{}, claims)
 		if subject != "" {
 			ctx = rest.WithPrincipal(ctx, subject)
 		}
@@ -84,13 +88,27 @@ func (m *middleware) Wrap(
 // claimsKey is the key of the claims in the context of the requests.
 type claimsKey struct{}
 
-// keyFunc returns the key of the middleware, whatever the token, as the
-// parser only accepts the algorithms of the middleware, all of which fit
-// the key.
-func (m *middleware) keyFunc(
+// keyring gives the key verifying a token, once the parser checked that
+// its algorithm is one of the middleware.
+type keyring interface {
+	// key returns the key verifying the token, the context being the one
+	// of its request, or the reason no key does.
+	key(ctx context.Context, token *gojwt.Token) (any, error)
+}
+
+// staticKey is the keyring of the secret or of the public key of the
+// configuration.
+type staticKey struct {
+	value any
+}
+
+// key returns the key, whatever the token, as the creator checked that
+// every algorithm of the middleware fits it.
+func (k staticKey) key(
+	context.Context,
 	*gojwt.Token,
 ) (any, error) {
-	return m.key, nil
+	return k.value, nil
 }
 
 // middlewareToken returns the token of the "Authorization: Bearer <token>"

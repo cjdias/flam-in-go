@@ -12,6 +12,10 @@ const bundleId = "flam.broker.brokers.nats"
 // of their configuration.
 const Driver = "flam.broker.brokers.driver.nats"
 
+// messagingSystem is the messaging system of the spans of the brokers,
+// held by their "messaging.system" attribute.
+const messagingSystem = "nats"
+
 // Fields of a NATS broker configuration.
 const (
 	// ConfigFieldURL is the field holding the URL of the server, or the

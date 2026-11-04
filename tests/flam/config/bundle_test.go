@@ -358,6 +358,8 @@ func Test_Aggregators(t *testing.T) {
 			"bundle:flam.config.sources.file", "provider/1",
 			"bundle:flam.config.sources.dir", "provider/1",
 			"bundle:flam.config.sources.rest", "provider/0", "provider/1",
+			"bundle:flam.config.sources.consul", "provider/1",
+			"bundle:flam.config.sources.etcd", "provider/1",
 		}},
 	}
 	for _, s := range scenarios {
