@@ -167,6 +167,26 @@ The defaults of the fields of each driver live under the `defaults` path of
 its feature, such as `flam.rest.defaults.servers.standard.address`, and the
 package documentation of each driver lists its fields.
 
+## Functional tests
+
+[`funit`](pkg/funit) runs a functional test against an application: it adds
+the configuration of the test, activates its processes, boots and runs the
+application, then runs the arrange, act and assert functions, invoked
+through the container, and always tears down, rolling back the database
+transaction of the test and removing its configuration.
+
+```go
+var total int64
+runner, _ := funit.NewRunner(app, t)
+_ = runner.
+	WithConfig("testdata/config.yaml", 100).
+	WithProcess("api").
+	WithArrangeDatabase("main").
+	WithAct(func() error { return runner.Tx().Model(&User{}).Count(&total).Error }).
+	WithAssertTotal(0, &total).
+	Run()
+```
+
 ## Development
 
 The project uses [Task](https://taskfile.dev) and pins its tools in
