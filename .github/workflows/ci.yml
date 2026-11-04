@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # the minor version of go.mod, at its latest patch, as the scan of
+      # the vulnerabilities covers the standard library too
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+
+      - name: Format
+        run: |
+          files=$(gofmt -l .)
+          if [ -n "$files" ]; then echo "not formatted:"; echo "$files"; exit 1; fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.15.0
+
+      - name: Staticcheck
+        run: go tool -modfile=tools/go.mod staticcheck ./...
+
+      - name: Vulnerabilities
+        run: go tool -modfile=tools/go.mod govulncheck ./...
+
+      - name: Test and coverage
+        run: |
+          go test -race -coverpkg=./pkg/... -coverprofile=coverage.out ./...
+          missing=$(go tool cover -func=coverage.out | grep -v '100.0%' || true)
+          if [ -n "$missing" ]; then echo "not fully covered:"; echo "$missing"; exit 1; fi

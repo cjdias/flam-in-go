@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+
+# editors
+.idea/
+.vscode/
+
+# build and test output
+*.test
+*.prof
+coverage.out
+coverage.html

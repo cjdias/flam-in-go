@@ -1,0 +1,14 @@
+version: "2"
+
+linters:
+  settings:
+    staticcheck:
+      checks:
+        - all
+        # the embedded fields are named in the selectors on purpose, such
+        # as tx.Dialector of a gorm.DB, which tells where the value is from
+        - -QF1008
+        # the style checks of staticcheck that flam does not follow
+        - -ST1000
+        - -ST1003
+        - -ST1016
