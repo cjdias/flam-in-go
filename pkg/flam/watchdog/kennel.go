@@ -210,6 +210,11 @@ func (k *kennel) IsDraining() bool {
 	return k.draining
 }
 
+// Close closes the kennel, as the close of the application does.
+func (k *kennel) Close() error {
+	return k.close()
+}
+
 // Activate fails with ErrUnknownProcess for an unknown process, and with
 // ErrRunning while the kennel runs its processes.
 func (k *kennel) Activate(

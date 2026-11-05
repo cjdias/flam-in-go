@@ -25,6 +25,9 @@ type Logger interface {
 func NewLogger(
 	t testing.TB,
 ) Logger {
+	if isNil(t) {
+		return &logger{}
+	}
 	return &logger{t: t}
 }
 

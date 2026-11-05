@@ -53,10 +53,24 @@ var (
 	// when the processes of the test do not run within the start timeout.
 	ErrStartTimeout = errors.New("funit processes did not start in time")
 
+	// ErrNotRunning is the error wrapped by the error returned from Run
+	// when the run of the application ends before the processes of the
+	// test ran, such as with the run of the kennel disabled, or a process
+	// ending at once, held by [ErrorFieldProcess].
+	ErrNotRunning = errors.New("funit processes ended before running")
+
 	// ErrStopTimeout is the error wrapped by the error returned from Run
 	// when the run of the application does not end within the stop timeout
-	// once its processes are closed.
+	// once its kennel is closed. The teardown functions, the deactivation
+	// of the processes and the removal of the configuration sources, all
+	// going through the container the run still holds, are skipped then.
 	ErrStopTimeout = errors.New("funit application did not stop in time")
+
+	// ErrRollback is the error wrapped, along with its cause, by the error
+	// returned from Run when the transaction of WithArrangeDatabase cannot
+	// be rolled back, such as once committed by the test, so that the test
+	// may have left its changes in the database.
+	ErrRollback = errors.New("unable to roll back funit transaction")
 )
 
 // newErr returns the error wrapping the sentinel, joined with the cause

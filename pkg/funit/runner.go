@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"reflect"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -60,16 +61,17 @@ type Runner struct {
 	teardowns []stage
 	topics    []string
 
-	ran     bool
-	added   []*source    // the configuration sources added
-	kennel  flam.IKennel // the kennel of the application, if any
-	done    chan error   // the end of the run of the application
-	pubsub  flam.IPubSub[string, string]
-	conn    flam.IDatabaseConnection
-	tx      *gorm.DB
-	redis   flam.IRedisConnection
-	mu      sync.Mutex
-	records []Published
+	ran       bool
+	added     []*source    // the configuration sources added
+	activated []string     // the processes activated, inactive before
+	kennel    flam.IKennel // the kennel of the application, if any
+	done      chan error   // the end of the run of the application
+	pubsub    flam.IPubSub[string, string]
+	conn      flam.IDatabaseConnection
+	tx        *gorm.DB
+	redis     flam.IRedisConnection
+	mu        sync.Mutex
+	records   []Published
 }
 
 // Published is a message published on a topic the runner subscribed to,
@@ -131,7 +133,8 @@ func (r *Runner) WithPublishedTimeout(
 }
 
 // WithConfig adds the values of the configuration file, read by the
-// configuration parser of the id, [DefaultConfigParser] unless given, to
+// configuration parser of the id, [DefaultConfigParser] unless given or
+// empty, to
 // the configuration of the application, with the priority, for the time
 // of the run.
 func (r *Runner) WithConfig(
@@ -139,11 +142,11 @@ func (r *Runner) WithConfig(
 	priority int,
 	parser ...string,
 ) *Runner {
-	r.configs = append(r.configs, configReg{
-		file:     file,
-		priority: priority,
-		parser:   append(parser, DefaultConfigParser)[0],
-	})
+	id := DefaultConfigParser
+	if len(parser) > 0 && parser[0] != "" {
+		id = parser[0]
+	}
+	r.configs = append(r.configs, configReg{file: file, priority: priority, parser: id})
 	return r
 }
 
@@ -160,7 +163,9 @@ func (r *Runner) WithConfigValues(
 
 // WithProcess activates the watchdog process of the id, typically
 // configured inactive, for the run, which waits for it to run before the
-// act. It needs the watchdog bundle.
+// act, failing when the run of the application ends before. A process
+// inactive before is deactivated once the run ends. It needs the watchdog
+// bundle.
 func (r *Runner) WithProcess(
 	id string,
 ) *Runner {
@@ -190,13 +195,17 @@ func (r *Runner) WithArrangePubSub() *Runner {
 // WithArrangeSignals takes the in-process pub/sub of the application, as
 // WithArrangePubSub does, and subscribes to the topics, recording the
 // messages published on them, returned then by Published and checked by
-// WithAssertPublished. The subscriptions are cancelled once the run ends.
+// WithAssertPublished. A topic is subscribed to once, however many times
+// given. The subscriptions are cancelled once the run ends.
 func (r *Runner) WithArrangeSignals(
 	topics ...string,
 ) *Runner {
 	return r.WithArrange("signals", func(pubsub flam.IPubSub[string, string]) error {
 		r.pubsub = pubsub
 		for _, topic := range topics {
+			if slices.Contains(r.topics, topic) {
+				continue
+			}
 			if err := pubsub.Subscribe(r.subscription(topic), topic, r.record, nil); err != nil {
 				return err
 			}
@@ -306,6 +315,13 @@ func (r *Runner) Published() []Published {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]Published{}, r.records...)
+}
+
+// recorded returns the number of the messages recorded.
+func (r *Runner) recorded() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.records)
 }
 
 // Message of the errors returned by NewRunner.

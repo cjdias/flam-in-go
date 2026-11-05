@@ -91,29 +91,31 @@ func (r *Runner) WithAssertBool(
 }
 
 // WithAssertPublished adds the assertion that the messages recorded on the
-// topics of WithArrangeSignals were published on the topics, in order,
-// waiting up to the published timeout for them to be delivered, as the
-// pub/sub delivers them on goroutines of their own.
+// topics of WithArrangeSignals were published on the topics, as many times
+// as given, waiting up to the published timeout for them to be delivered.
+// The order of the messages across topics is not checked, as the pub/sub
+// delivers those of each subscription on a goroutine of its own.
 func (r *Runner) WithAssertPublished(
 	topics ...string,
 ) *Runner {
 	return r.WithAssert("published", func() {
 		r.t.Helper()
 		got := r.awaitPublished(len(topics))
-		if !slices.Equal(got, topics) {
-			r.t.Errorf("funit: published on %q, want %q", got, topics)
+		want := slices.Sorted(slices.Values(topics))
+		if !slices.Equal(got, want) {
+			r.t.Errorf("funit: published on %q, want %q", got, want)
 		}
 	})
 }
 
-// awaitPublished returns the topics of the recorded messages, once n of
-// them were recorded, or once the published timeout elapsed, waiting then
-// a little more for unexpected ones to show.
+// awaitPublished returns the topics of the recorded messages, sorted,
+// once n of them were recorded, or once the published timeout elapsed,
+// waiting then a little more for unexpected ones to show.
 func (r *Runner) awaitPublished(
 	n int,
 ) []string {
 	deadline := time.Now().Add(r.publishedTimeout)
-	for len(r.Published()) < n && time.Now().Before(deadline) {
+	for r.recorded() < n && time.Now().Before(deadline) {
 		time.Sleep(pollInterval)
 	}
 	time.Sleep(10 * pollInterval) // an unexpected message after the expected ones
@@ -121,5 +123,6 @@ func (r *Runner) awaitPublished(
 	for _, p := range r.Published() {
 		topics = append(topics, p.Topic)
 	}
+	slices.Sort(topics)
 	return topics
 }

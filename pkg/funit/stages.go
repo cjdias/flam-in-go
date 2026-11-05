@@ -23,7 +23,8 @@ import (
 // It returns the first error of the stages, or else of the end of the
 // run, reported to the test as well, and fails with ErrRan when the runner
 // ran already. A stage panicking still ends the run before the panic goes
-// on.
+// on. The run of the application ends with the close of its kennel, so
+// that it does not run again.
 func (r *Runner) Run() (err error) {
 	r.t.Helper()
 	defer func() {
@@ -160,15 +161,21 @@ func (r *Runner) readConfig(
 }
 
 // activate activates the processes of the test in the kennel of the
-// application, failing with ErrProcess without kennel, or for a process
-// the kennel does not hold.
+// application, recording those inactive before, deactivated once the run
+// ends, failing with ErrProcess without kennel, or for a process the
+// kennel does not hold.
 func (r *Runner) activate() error {
 	var process string
 	err := r.app.Invoke(func(kennel flam.IKennel) error {
+		r.kennel = kennel
 		for _, process = range r.processes {
+			if kennel.IsActive(process) {
+				continue
+			}
 			if err := kennel.Activate(process); err != nil {
 				return err
 			}
+			r.activated = append(r.activated, process)
 		}
 		return nil
 	})
@@ -203,18 +210,25 @@ func (r *Runner) start() error {
 
 	deadline := time.NewTimer(r.startTimeout)
 	defer deadline.Stop()
+	poll := time.NewTicker(pollInterval)
+	defer poll.Stop()
 	for {
 		select {
 		case err := <-r.done:
 			r.done = nil
-			if err != nil {
+			switch {
+			case err != nil:
 				return newErr(ErrRun, runMessage, err)
+			case len(r.processes) > 0:
+				// the act would call processes not running
+				return newErr(ErrNotRunning, runMessage, nil).
+					With(ErrorFieldProcess, r.processes)
 			}
 			return nil
 		case <-deadline.C:
 			return newErr(ErrStartTimeout, runMessage, nil).
 				With(ErrorFieldTimeout, r.startTimeout)
-		case <-time.After(pollInterval):
+		case <-poll.C:
 			if r.started() {
 				return nil
 			}
@@ -240,21 +254,38 @@ func (r *Runner) started() bool {
 }
 
 // end ends the run: it stops the application, runs the teardown
-// functions, rolls back the transaction, cancels the subscriptions and
-// removes the configuration sources, all of them even when one fails,
-// returning their errors joined.
+// functions, rolls back the transaction, cancels the subscriptions,
+// deactivates the processes activated and removes the configuration
+// sources, all of them even when one fails, returning their errors joined.
+// While the run of the application goes on, past the stop timeout, what
+// goes through its container is skipped, as the run holds it.
 func (r *Runner) end() error {
-	errs := []error{r.stop()}
+	stopped, err := r.stop()
+	errs := []error{err}
 
 	r.logger.Stage(StageTeardown)
-	for _, s := range r.teardowns {
-		errs = append(errs, r.invoke(StageTeardown, s))
+	if !stopped {
+		r.logger.Error(StageTeardown, "", errStillRunning)
+	} else {
+		for _, s := range r.teardowns {
+			errs = append(errs, r.invoke(StageTeardown, s))
+		}
 	}
 	if r.tx != nil {
-		r.tx.Rollback()
+		if err := r.tx.Rollback().Error; err != nil {
+			errs = append(errs, newErr(ErrRollback, runMessage, err))
+		}
 	}
 	for _, topic := range r.topics {
 		errs = append(errs, r.pubsub.Unsubscribe(r.subscription(topic)))
+	}
+	if !stopped {
+		return errors.Join(errs...)
+	}
+	for _, id := range r.activated {
+		if err := r.kennel.Deactivate(id); err != nil {
+			errs = append(errs, newErr(ErrProcess, runMessage, err).With(ErrorFieldProcess, id))
+		}
 	}
 	if len(r.added) > 0 {
 		errs = append(errs, r.app.Invoke(func(config flam.IConfig) error {
@@ -268,34 +299,35 @@ func (r *Runner) end() error {
 	return errors.Join(errs...)
 }
 
-// stop closes the processes of the kennel, ending the run of the
-// application, and waits for it to end, failing with ErrStopTimeout when
-// it does not end in time, and with ErrRun when it failed.
-func (r *Runner) stop() error {
+// errStillRunning is the error logged when the teardown is skipped, as
+// the run of the application goes on.
+var errStillRunning = errors.New("skipped, as the application still runs")
+
+// stop closes the kennel, and so its processes, ending the run of the
+// application, and waits for it to end, reporting whether it ended,
+// failing with ErrStopTimeout when it does not end in time, and with
+// ErrRun when it failed.
+func (r *Runner) stop() (bool, error) {
 	if r.done == nil {
-		return nil
+		return true, nil
 	}
 	r.logger.Stage(StageStop)
 
-	var errs []error
-	for _, id := range r.kennel.Available() {
-		process, _ := r.kennel.Process(id)
-		errs = append(errs, process.Close())
-	}
-
+	errs := []error{r.kennel.Close()}
 	timer := time.NewTimer(r.stopTimeout)
 	defer timer.Stop()
 	select {
 	case err := <-r.done:
+		r.done = nil
 		if err != nil {
 			errs = append(errs, newErr(ErrRun, runMessage, err))
 		}
+		return true, errors.Join(errs...)
 	case <-timer.C:
 		errs = append(errs, newErr(ErrStopTimeout, runMessage, nil).
 			With(ErrorFieldTimeout, r.stopTimeout))
+		return false, errors.Join(errs...)
 	}
-	r.done = nil
-	return errors.Join(errs...)
 }
 
 // invoke invokes the function of the stage through the container of the

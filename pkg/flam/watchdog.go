@@ -88,4 +88,9 @@ type IKennel interface {
 	// application, reading it, fails while the servers keep serving. It
 	// stays true once set, as a closed kennel never runs again.
 	IsDraining() bool
+
+	// Close closes the kennel, and so every process, ending its run, such
+	// as for a test ending the run of its application. A closed kennel
+	// never runs again, and closing it again does nothing.
+	Close() error
 }

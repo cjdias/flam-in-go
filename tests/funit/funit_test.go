@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -131,6 +132,7 @@ func Test_Declarations(t *testing.T) {
 		"ErrRan": funit.ErrRan, "ErrConfig": funit.ErrConfig, "ErrProcess": funit.ErrProcess,
 		"ErrBoot": funit.ErrBoot, "ErrStage": funit.ErrStage, "ErrRun": funit.ErrRun,
 		"ErrStartTimeout": funit.ErrStartTimeout, "ErrStopTimeout": funit.ErrStopTimeout,
+		"ErrNotRunning": funit.ErrNotRunning, "ErrRollback": funit.ErrRollback,
 	} {
 		if err == nil {
 			t.Errorf("%s = nil", name)
@@ -334,6 +336,19 @@ func Test_Runner_Config(t *testing.T) {
 		})
 	}
 
+	t.Run("should read a file with the default parser for an empty id", func(t *testing.T) {
+		a := newApp(t, nil)
+		r, _ := newRunner(t, a)
+		parsers := make([]string, 1, 2)
+		var name any
+		testutil.NoError(t, r.
+			WithConfig(yamlFile, 10, parsers...).
+			WithAct(func(c flam.IConfig) { name = c.Get("app.name") }).
+			Run())
+		testutil.Equal(t, "name", name, "yaml")
+		testutil.Equal(t, "parsers", parsers[:cap(parsers)], []string{"", ""})
+	})
+
 	t.Run("should fail without configuration", func(t *testing.T) {
 		r, ft := newRunner(t, testutil.NewApp())
 		runError(t, r.WithConfigValues(container.Bag{"a": 1}, 0).Run(), ft, funit.ErrConfig)
@@ -461,8 +476,52 @@ func Test_Runner_Processes(t *testing.T) {
 		api.stubborn = true
 		defer close(api.release)
 		r, ft := newRunner(t, processApp(t, false, api))
-		err := r.WithProcess("api").WithStopTimeout(20 * time.Millisecond).Run()
+		tornDown := false
+		err := r.
+			WithProcess("api").
+			WithStopTimeout(20*time.Millisecond).
+			WithTeardown("t", func() { tornDown = true }).
+			Run()
 		runError(t, err, ft, funit.ErrStopTimeout)
+		testutil.Equal(t, "torn down while running", tornDown, false)
+	})
+
+	t.Run("should fail when the processes end before running", func(t *testing.T) {
+		api := newProcess("api")
+		api.silent = true
+		_ = api.Close() // its run ends at once
+		r, ft := newRunner(t, processApp(t, false, api))
+		runError(t, r.WithProcess("api").Run(), ft, funit.ErrNotRunning)
+	})
+
+	t.Run("should close the processes once, through the kennel", func(t *testing.T) {
+		api := &closeCounting{process: newProcess("api")}
+		a := processApp(t, false, api)
+		r, _ := newRunner(t, a)
+		testutil.NoError(t, r.WithProcess("api").Run())
+		testutil.NoError(t, a.Close())
+		testutil.Equal(t, "closes", api.closes.Load(), int32(1))
+	})
+
+	for name, active := range map[string]bool{"inactive": false, "active": true} {
+		t.Run("should leave an "+name+" process "+name, func(t *testing.T) {
+			a := processApp(t, active, newProcess("api"))
+			r, _ := newRunner(t, a)
+			testutil.NoError(t, r.WithProcess("api").Run())
+			var got bool
+			testutil.NoError(t, a.Invoke(func(k flam.IKennel) { got = k.IsActive("api") }))
+			testutil.Equal(t, "active", got, active)
+		})
+	}
+
+	t.Run("should deactivate the processes when the arrange fails", func(t *testing.T) {
+		a := processApp(t, false, newProcess("api"))
+		r, ft := newRunner(t, a)
+		err := r.WithProcess("api").WithArrange("a", func() error { return errBoom }).Run()
+		runError(t, err, ft, funit.ErrStage)
+		var got bool
+		testutil.NoError(t, a.Invoke(func(k flam.IKennel) { got = k.IsActive("api") }))
+		testutil.Equal(t, "active", got, false)
 	})
 
 	t.Run("should fail when the run of the application fails once stopped", func(t *testing.T) {
@@ -474,6 +533,17 @@ func Test_Runner_Processes(t *testing.T) {
 		}
 		testutil.Equal(t, "failures", len(ft.failures()), 1)
 	})
+}
+
+// closeCounting is a process counting its closes.
+type closeCounting struct {
+	*process
+	closes atomic.Int32
+}
+
+func (p *closeCounting) Close() error {
+	p.closes.Add(1)
+	return p.process.Close()
 }
 
 // closeFailing is a process failing to close, and returning an error once
@@ -504,7 +574,7 @@ func Test_Runner_Signals(t *testing.T) {
 				}
 				return nil
 			}).
-			WithAssertPublished("users.created", "audit").
+			WithAssertPublished("audit", "users.created").
 			Run())
 		testutil.Equal(t, "failures", len(ft.failures()), 0)
 		published := r.Published()
@@ -529,6 +599,20 @@ func Test_Runner_Signals(t *testing.T) {
 		if len(failures) != 1 || !strings.Contains(failures[0], `published on ["a"], want ["a" "a"]`) {
 			t.Errorf("failures = %q, want the missing message", failures)
 		}
+	})
+
+	t.Run("should subscribe to a topic once", func(t *testing.T) {
+		r, ft := newRunner(t, newApp(t, nil))
+		testutil.NoError(t, r.
+			WithPublishedTimeout(20*time.Millisecond).
+			WithArrangeSignals("a", "a").
+			WithArrangeSignals("a").
+			WithAct(func(ps flam.IPubSub[string, string]) error {
+				return ps.Publish(context.Background(), "a", "x")
+			}).
+			WithAssertPublished("a").
+			Run())
+		testutil.Equal(t, "failures", ft.failures(), []string{})
 	})
 
 	t.Run("should take the pub/sub", func(t *testing.T) {
@@ -591,6 +675,15 @@ func Test_Runner_Data(t *testing.T) {
 			return conn.Model(&user{}).Count(&total).Error
 		}))
 		testutil.Equal(t, "total once rolled back", total, int64(0))
+	})
+
+	t.Run("should fail when the transaction cannot be rolled back", func(t *testing.T) {
+		r, ft := newRunner(t, dataApp(t))
+		err := r.
+			WithArrangeDatabase("main").
+			WithAct(func() error { return r.Tx().Commit().Error }).
+			Run()
+		runError(t, err, ft, funit.ErrRollback)
 	})
 
 	t.Run("should take the redis connection", func(t *testing.T) {
@@ -665,6 +758,14 @@ func Test_Runner_Asserts(t *testing.T) {
 			testutil.Equal(t, "failed", len(ft.failures()) == 1, tc.fails)
 		})
 	}
+}
+
+func Test_Logger_NilTest(t *testing.T) {
+	var nilT *testing.T
+	l := funit.NewLogger(nilT)
+	l.Stage("arrange")
+	l.Step("arrange", "seed")
+	l.Error("arrange", "seed", errBoom)
 }
 
 func Test_Logger(t *testing.T) {

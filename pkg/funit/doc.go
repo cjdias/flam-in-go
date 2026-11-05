@@ -13,10 +13,11 @@
 //     answering the requests of the act.
 //   - Act: the act function runs.
 //   - Assert: the assertions run, failing the test on a mismatch.
-//   - Teardown: whatever the stages before it did, the processes are closed,
-//     so that the run of the application ends, the teardown functions run,
-//     the database transaction is rolled back, the subscriptions are
-//     cancelled and the configuration sources are removed.
+//   - Teardown: whatever the stages before it did, the kennel is closed,
+//     and so the processes, so that the run of the application ends, the
+//     teardown functions run, the database transaction is rolled back, the
+//     subscriptions are cancelled, the processes activated are deactivated
+//     and the configuration sources are removed.
 //
 // The stage functions are invoked through the container of the
 // application, so that they take its values as arguments:

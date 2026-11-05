@@ -63,6 +63,8 @@ func (k *kennel) IsRunning() bool { return k.running.Load() }
 
 func (k *kennel) IsDraining() bool { return k.draining.Load() }
 
+func (k *kennel) Close() error { return nil }
+
 // kennelBundle provides the kennel.
 type kennelBundle struct{ k *kennel }
 
